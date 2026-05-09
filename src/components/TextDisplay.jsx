@@ -1,4 +1,4 @@
-import { useRef, useEffect, forwardRef, memo } from "react";
+import { useRef, useEffect, forwardRef, memo, useMemo, useSyncExternalStore } from "react";
 
 // Number of chunks around the current one that get full per-word tokenization.
 // Chunks outside this window render as a single span (per-chunk click only).
@@ -15,10 +15,11 @@ function tokenize(text) {
 }
 
 const CurrentChunk = forwardRef(function CurrentChunk(
-  { text, wordIndex, chunkIndex },
+  { text, chunkIndex, subscribeWordIndex, getWordIndex },
   ref,
 ) {
-  const tokens = tokenize(text);
+  const wordIndex = useSyncExternalStore(subscribeWordIndex, getWordIndex);
+  const tokens = useMemo(() => tokenize(text), [text]);
 
   // Highlight the last word whose start <= wordIndex rather than checking
   // whether wordIndex falls inside the token's range. This prevents short
@@ -55,7 +56,7 @@ const TokenizedChunk = memo(function TokenizedChunk({
   className,
   chunkIndex,
 }) {
-  const tokens = tokenize(text);
+  const tokens = useMemo(() => tokenize(text), [text]);
   return (
     <span className={className}>
       {tokens.map((token, j) => {
@@ -91,7 +92,8 @@ const PlainChunk = memo(function PlainChunk({ text, className, chunkIndex }) {
 export default function TextDisplay({
   chunks,
   chunkIndex,
-  wordIndex,
+  subscribeWordIndex,
+  getWordIndex,
   scrollTrigger,
   seekTo,
 }) {
@@ -139,8 +141,9 @@ export default function TextDisplay({
                 <CurrentChunk
                   ref={activeRef}
                   text={chunk}
-                  wordIndex={wordIndex}
                   chunkIndex={i}
+                  subscribeWordIndex={subscribeWordIndex}
+                  getWordIndex={getWordIndex}
                 />{" "}
               </span>
             );

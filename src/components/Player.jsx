@@ -40,7 +40,7 @@ function IconPause() {
 
 export default function Player({
   isPlaying, chunkIndex, chunks,
-  play, pause, stop, skip, seekTo,
+  play, pause, stop, skip, seekTo, t,
 }) {
   const total = chunks.length;
   const pct = total > 0 ? (chunkIndex / total) * 100 : 0;
@@ -61,7 +61,7 @@ export default function Player({
 
       <div className="progress-info">
         <span>{Math.round(pct)}%</span>
-        <span>{total > 0 ? `Frase ${chunkIndex + 1} / ${total}` : '—'}</span>
+        <span>{total > 0 ? t.sentence(chunkIndex, total) : '—'}</span>
       </div>
 
       {/* Controls */}

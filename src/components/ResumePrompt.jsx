@@ -1,18 +1,15 @@
-export default function ResumePrompt({ position, onResume, onRestart }) {
+export default function ResumePrompt({ position, onResume, onRestart, t }) {
   return (
     <div className="resume-overlay" onClick={onRestart}>
       <div className="resume-modal" onClick={e => e.stopPropagation()}>
-        <p className="resume-title">Sessione precedente</p>
-        <p className="resume-desc">
-          Hai lasciato al <strong>{position.pct}%</strong>
-          {' '}(frase {position.index + 1})
-        </p>
+        <p className="resume-title">{t.resumeTitle}</p>
+        <p className="resume-desc">{t.resumeDesc(position.pct, position.index)}</p>
         <div className="resume-buttons">
           <button className="resume-btn secondary" onClick={onRestart}>
-            Ricomincia
+            {t.restart}
           </button>
           <button className="resume-btn primary" onClick={() => onResume(position)}>
-            Riprendi {position.pct}%
+            {t.resume(position.pct)}
           </button>
         </div>
       </div>

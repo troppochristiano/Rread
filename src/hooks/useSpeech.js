@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 
 // Approx chars/sec a TTS voice utters at rate=1. Used as a fallback for voices
 // that never fire `onboundary` (Microsoft "Online"/"Natural", most Google
@@ -12,9 +12,22 @@ const ESTIMATOR_TICK_MS = 100;
 
 export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
   const [chunkIndex, setChunkIndex] = useState(0);
-  const [wordIndex, setWordIndex] = useState(0); // absolute char offset in current chunk
   const [isPlaying, setIsPlaying] = useState(false);
   const [scrollTrigger, setScrollTrigger] = useState(0);
+
+  // wordIndex is not React state — updates go directly to subscribers so only
+  // CurrentChunk re-renders on each tick, not the entire App/TextDisplay tree.
+  const wordIndexRef = useRef(0);
+  const wordIndexListeners = useRef(new Set());
+  function setWordIndex(v) {
+    wordIndexRef.current = v;
+    wordIndexListeners.current.forEach(fn => fn());
+  }
+  const subscribeWordIndex = useCallback((cb) => {
+    wordIndexListeners.current.add(cb);
+    return () => wordIndexListeners.current.delete(cb);
+  }, []);
+  const getWordIndex = useCallback(() => wordIndexRef.current, []);
 
   const r = useRef({
     chunkIndex: 0,
@@ -30,12 +43,13 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
     speakGen: 0, // incremented each doSpeak call to cancel stale onend
   });
 
-  // Keep refs in sync with latest props/state
-  useEffect(() => { r.current.voice = selectedVoice; }, [selectedVoice]);
-  useEffect(() => { r.current.rate = rate; }, [rate]);
-  useEffect(() => { r.current.pitch = pitch; }, [pitch]);
-  useEffect(() => { r.current.volume = volume; }, [volume]);
-  useEffect(() => { r.current.chunks = chunks; }, [chunks]);
+  // Sync props into ref on every render — immediate and avoids stale-ref window
+  // that useEffect would leave between render and commit.
+  r.current.voice = selectedVoice;
+  r.current.rate = rate;
+  r.current.pitch = pitch;
+  r.current.volume = volume;
+  r.current.chunks = chunks;
 
   // ─── Core speak function ────────────────────────────────────────────────────
 
@@ -117,6 +131,7 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
       console.error('Speech error:', e.error);
     };
 
+    r.current.utterance = utterance;
     window.speechSynthesis.speak(utterance);
   }
 
@@ -145,24 +160,12 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
 
   // ─── Settings change during playback ────────────────────────────────────────
 
-  const prevSettings = useRef({ rate, pitch, volume, voice: selectedVoice });
-
   useEffect(() => {
-    const prev = prevSettings.current;
-    const changed =
-      prev.rate !== rate ||
-      prev.pitch !== pitch ||
-      prev.volume !== volume ||
-      prev.voice !== selectedVoice;
-
-    prevSettings.current = { rate, pitch, volume, voice: selectedVoice };
-
-    if (changed && r.current.isPlaying) {
-      const { chunks: ch, chunkIndex: ci, lastCharIndex } = r.current;
-      window.speechSynthesis.cancel();
-      doSpeak(ch[ci], ci, lastCharIndex);
-    }
-  }); // no deps — runs after every render to catch any change
+    if (!r.current.isPlaying) return;
+    const { chunks: ch, chunkIndex: ci, lastCharIndex } = r.current;
+    silenceAndCancel();
+    doSpeak(ch[ci], ci, lastCharIndex);
+  }, [rate, pitch, volume, selectedVoice]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Public API ─────────────────────────────────────────────────────────────
 
@@ -176,8 +179,18 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
     setScrollTrigger(t => t + 1);
 
     const { chunks: ch, chunkIndex: ci, lastCharIndex } = r.current;
-    window.speechSynthesis.cancel();
+    silenceAndCancel();
     doSpeak(ch[ci], ci, lastCharIndex);
+  }
+
+  function silenceAndCancel() {
+    // Zero volume first — silences audio immediately even if the browser
+    // delays the actual cancellation of the utterance.
+    if (r.current.utterance) {
+      r.current.utterance.volume = 0;
+      r.current.utterance = null;
+    }
+    window.speechSynthesis.cancel();
   }
 
   function pause() {
@@ -188,19 +201,22 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
     // and won't trigger advanceChunk or update lastCharIndex after we pause.
     ++r.current.speakGen;
     setIsPlaying(false);
-    window.speechSynthesis.cancel();
+    silenceAndCancel();
   }
 
   function stop() {
     r.current.isPlaying = false;
     r.current.paused = false;
     r.current.stopped = true;
+    // Bump speakGen so any in-flight onend from the last utterance can't
+    // trigger advanceChunk after stop() has already run.
+    ++r.current.speakGen;
     r.current.chunkIndex = 0;
     r.current.lastCharIndex = 0;
     setIsPlaying(false);
     setChunkIndex(0);
     setWordIndex(0);
-    window.speechSynthesis.cancel();
+    silenceAndCancel();
   }
 
   function skip(dir) {
@@ -212,7 +228,7 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
     setWordIndex(0);
 
     if (r.current.isPlaying) {
-      window.speechSynthesis.cancel();
+      silenceAndCancel();
       doSpeak(ch[newIndex], newIndex, 0);
     }
   }
@@ -226,15 +242,15 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
     setWordIndex(charOffset);
 
     if (r.current.isPlaying) {
-      window.speechSynthesis.cancel();
+      silenceAndCancel();
       doSpeak(ch[newIndex], newIndex, charOffset);
     }
   }
 
   // Cleanup on unmount
   useEffect(() => {
-    return () => { window.speechSynthesis.cancel(); };
+    return () => { silenceAndCancel(); };
   }, []);
 
-  return { isPlaying, chunkIndex, wordIndex, scrollTrigger, play, pause, stop, skip, seekTo };
+  return { isPlaying, chunkIndex, subscribeWordIndex, getWordIndex, scrollTrigger, play, pause, stop, skip, seekTo };
 }

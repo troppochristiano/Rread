@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 const STORAGE_KEY = 'tts_voice';
 
@@ -31,10 +31,10 @@ export function useVoices() {
     return () => { window.speechSynthesis.onvoiceschanged = null; };
   }, []);
 
-  function setSelectedVoice(voice) {
+  const setSelectedVoice = useCallback((voice) => {
     setSelectedVoiceState(voice);
     if (voice) localStorage.setItem(STORAGE_KEY, voice.name);
-  }
+  }, []);
 
   return { voices, selectedVoice, setSelectedVoice };
 }

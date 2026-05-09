@@ -4,6 +4,9 @@ import { hashText } from '../utils/hash';
 const TEXT_KEY = 'tts_last_text';
 
 export function usePersistence({ text, chunkIndex, chunks }) {
+  // Compute once per text change — hashText is O(n) on text length
+  const key = useMemo(() => text ? hashText(text) : null, [text]);
+
   // Save text with 500ms debounce
   useEffect(() => {
     if (!text) return;
@@ -15,25 +18,10 @@ export function usePersistence({ text, chunkIndex, chunks }) {
 
   // Save position on every chunk change
   useEffect(() => {
-    if (!text || !chunks || chunks.length === 0) return;
-    const key = hashText(text);
+    if (!key || !chunks || chunks.length === 0) return;
     const pct = Math.round((chunkIndex / chunks.length) * 100);
     localStorage.setItem(key, JSON.stringify({ index: chunkIndex, pct }));
-  }, [chunkIndex, text, chunks]);
-
-  // savedPosition is freshly computed whenever text changes
-  const savedPosition = useMemo(() => {
-    if (!text) return null;
-    const key = hashText(text);
-    try {
-      const raw = localStorage.getItem(key);
-      return raw ? JSON.parse(raw) : null;
-    } catch {
-      return null;
-    }
-  }, [text]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  return { savedPosition };
+  }, [chunkIndex, key, chunks]);
 }
 
 export function getInitialText() {
