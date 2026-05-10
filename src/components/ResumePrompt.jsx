@@ -1,6 +1,6 @@
-export default function ResumePrompt({ position, onResume, onRestart, t }) {
+export default function ResumePrompt({ position, onResume, onRestart, onDismiss, t }) {
   return (
-    <div className="resume-overlay" onClick={onRestart}>
+    <div className="resume-overlay" onClick={onDismiss}>
       <div className="resume-modal" onClick={e => e.stopPropagation()}>
         <p className="resume-title">{t.resumeTitle}</p>
         <p className="resume-desc">{t.resumeDesc(position.pct, position.index)}</p>

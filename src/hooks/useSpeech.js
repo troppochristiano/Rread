@@ -3,12 +3,75 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 // Approx chars/sec a TTS voice utters at rate=1. Used as a fallback for voices
 // that never fire `onboundary` (Microsoft "Online"/"Natural", most Google
 // voices). ~150 wpm × ~6 chars/word ≈ 15.
-const ESTIMATED_CHARS_PER_SECOND = 15;
+const ESTIMATED_CHARS_PER_SECOND = 20;
 // Grace period before the estimator kicks in, so voices that *do* support
 // boundaries get to fire one first and suppress the estimator.
 const ESTIMATOR_GRACE_MS = 250;
 // Throttle the estimator — words are spoken at ~2-3/sec so 100ms is plenty.
 const ESTIMATOR_TICK_MS = 100;
+
+// Chunks (sentence-sized, the unit of display/seek/highlight) get batched into
+// larger utterances at speak-time. Each utterance carries an end-of-utterance
+// silence the engine inserts on its own (~150-300ms), which is the audible
+// "gap" between chunks. Batching collapses N gaps into 1 — sentences inside a
+// batch run together with natural prosodic punctuation pauses, not engine
+// silences. 1500 is comfortable for all engines I've tested without losing
+// `onboundary` accuracy on the voices that support it.
+const MAX_UTTERANCE_CHARS = 1500;
+
+// Pack chunks[startIdx..] (starting from `startCharOffset` within the first
+// chunk) into one utterance up to MAX_UTTERANCE_CHARS. Returns the joined
+// text plus a boundary table mapping char-positions-in-utterance back to the
+// originating display chunk, so `onboundary`/the estimator can flip the UI
+// to the right chunk as audio progresses through the batch.
+function buildBatch(allChunks, startIdx, startCharOffset) {
+  if (startIdx >= allChunks.length) return null;
+  const firstSegment = allChunks[startIdx].slice(startCharOffset);
+  if (!firstSegment.trim()) return null;
+
+  let text = firstSegment;
+  const boundaries = [{
+    chunkIdx: startIdx,
+    offsetInUtterance: 0,
+    baseCharOffset: startCharOffset,
+  }];
+
+  let i = startIdx + 1;
+  while (i < allChunks.length) {
+    const next = allChunks[i];
+    if (!next) { i++; continue; }
+    const projected = text.length + 1 + next.length; // +1 for joining space
+    if (projected > MAX_UTTERANCE_CHARS) break;
+    boundaries.push({
+      chunkIdx: i,
+      offsetInUtterance: text.length + 1,
+      baseCharOffset: 0,
+    });
+    text = text + ' ' + next;
+    i++;
+  }
+
+  return { text, boundaries, nextIdx: i };
+}
+
+// Resolve a char position within the utterance to {chunkIdx, localChar}, where
+// localChar is the absolute char offset within that display chunk's text (what
+// CurrentChunk uses to highlight a word).
+function resolveBoundary(charInUtterance, boundaries) {
+  for (let i = boundaries.length - 1; i >= 0; i--) {
+    if (charInUtterance >= boundaries[i].offsetInUtterance) {
+      const delta = charInUtterance - boundaries[i].offsetInUtterance;
+      return {
+        chunkIdx: boundaries[i].chunkIdx,
+        localChar: Math.max(0, delta) + boundaries[i].baseCharOffset,
+      };
+    }
+  }
+  return {
+    chunkIdx: boundaries[0].chunkIdx,
+    localChar: boundaries[0].baseCharOffset,
+  };
+}
 
 export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
   const [chunkIndex, setChunkIndex] = useState(0);
@@ -40,7 +103,13 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
     pitch,
     volume,
     chunks,
-    speakGen: 0, // incremented each doSpeak call to cancel stale onend
+    // Monotonic counter — each utterance gets a unique gen at creation time.
+    speakGen: 0,
+    // Watermark: any utterance with gen ≤ cancelThru is dead (its callbacks
+    // must no-op). Bumped to current speakGen on cancel/pause/stop/seek.
+    cancelThru: 0,
+    // gen of the utterance currently speaking (set in its onstart).
+    activeGen: 0,
   });
 
   // Sync props into ref on every render — immediate and avoids stale-ref window
@@ -53,13 +122,23 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
 
   // ─── Core speak function ────────────────────────────────────────────────────
 
-  function doSpeak(chunkText, index, charOffset) {
-    const text = chunkText.slice(charOffset);
-    if (!text.trim()) {
-      advanceChunk(index);
+  // Builds a batch starting at chunks[startIdx] from `startCharOffset`, queues
+  // it as a single utterance, and on `onstart` prefetches the *next* batch so
+  // the engine has zero JS-round-trip gap between batches.
+  function doSpeak(startIdx, startCharOffset) {
+    const batch = buildBatch(r.current.chunks, startIdx, startCharOffset);
+    if (!batch) {
+      // Empty/whitespace-only first chunk — skip past it.
+      const next = startIdx + 1;
+      if (next < r.current.chunks.length) {
+        doSpeak(next, 0);
+      } else {
+        endOfText();
+      }
       return;
     }
 
+    const { text, boundaries, nextIdx } = batch;
     const gen = ++r.current.speakGen;
 
     const utterance = new SpeechSynthesisUtterance(text);
@@ -68,61 +147,94 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
     utterance.pitch = r.current.pitch;
     utterance.volume = r.current.volume;
 
-    // Time-based fallback for voices that don't emit word boundaries.
-    let realBoundaryFired = false;
     let graceTimer = null;
     let intervalId = null;
-    let startTime = 0;
+    // Estimator base: last known char position and the time it was observed.
+    // Recalibrated on every onboundary so the estimator always extrapolates
+    // forward from the most recent confirmed position rather than from t=0.
+    let estBase = { charPos: 0, time: 0 };
+    // Last chunkIdx we resolved to — avoids redundant setChunkIndex calls
+    // and lets us detect cross-chunk transitions inside this batch.
+    let lastResolvedChunk = -1;
+
+    const isAlive = () => gen > r.current.cancelThru;
+    const isActive = () => r.current.activeGen === gen && isAlive();
 
     const stopEstimator = () => {
       if (graceTimer !== null) { clearTimeout(graceTimer); graceTimer = null; }
       if (intervalId !== null) { clearInterval(intervalId); intervalId = null; }
     };
 
-    const tick = () => {
-      if (gen !== r.current.speakGen || realBoundaryFired) {
-        stopEstimator();
-        return;
+    // Map a char-position-in-utterance to the display chunk it belongs to and
+    // push that into UI state. Called from onstart (charIdx=0), onboundary
+    // (engine charIndex), and the time estimator.
+    const applyChar = (charInUtterance) => {
+      const { chunkIdx, localChar } = resolveBoundary(charInUtterance, boundaries);
+      if (chunkIdx !== lastResolvedChunk) {
+        lastResolvedChunk = chunkIdx;
+        if (r.current.chunkIndex !== chunkIdx) {
+          r.current.chunkIndex = chunkIdx;
+          setChunkIndex(chunkIdx);
+        }
       }
-      const elapsedSec = (performance.now() - startTime) / 1000;
+      r.current.lastCharIndex = localChar;
+      setWordIndex(localChar);
+    };
+
+    const tick = () => {
+      if (!isActive()) { stopEstimator(); return; }
+      const elapsedSec = (performance.now() - estBase.time) / 1000;
       const estimated = Math.min(
         text.length - 1,
-        Math.floor(elapsedSec * ESTIMATED_CHARS_PER_SECOND * r.current.rate)
+        Math.floor(estBase.charPos + elapsedSec * ESTIMATED_CHARS_PER_SECOND * r.current.rate)
       );
-      const abs = charOffset + estimated;
-      // Skip state update if estimated position hasn't moved to a new word boundary
-      if (abs === r.current.lastCharIndex) return;
-      r.current.lastCharIndex = abs;
-      setWordIndex(abs);
+      applyChar(estimated);
     };
 
     utterance.onstart = () => {
-      if (gen !== r.current.speakGen) return;
-      startTime = performance.now();
+      if (!isAlive()) return;
+
+      // This utterance is now audible — promote it to active and flip the UI
+      // to the first chunk in this batch. Doing this in onstart (not in the
+      // previous onend) keeps the highlight perfectly in sync with audio.
+      r.current.activeGen = gen;
+      r.current.utterance = utterance;
+      estBase = { charPos: 0, time: performance.now() };
+      applyChar(0);
+
       graceTimer = setTimeout(() => {
         graceTimer = null;
-        if (gen !== r.current.speakGen || realBoundaryFired) return;
+        if (!isActive()) return;
         intervalId = setInterval(tick, ESTIMATOR_TICK_MS);
       }, ESTIMATOR_GRACE_MS);
+
+      // Prefetch the *next batch* into the engine's queue — this is what
+      // kills the inter-batch gap. The engine starts speaking it the instant
+      // we end.
+      if (nextIdx < r.current.chunks.length && r.current.isPlaying) {
+        doSpeak(nextIdx, 0);
+      }
     };
 
     utterance.onboundary = (e) => {
-      // Accept any boundary event — some voices/browsers fire 'sentence'
-      // instead of 'word', or omit e.name entirely.
       if (typeof e.charIndex !== 'number') return;
-      realBoundaryFired = true;
-      stopEstimator();
-      const abs = charOffset + e.charIndex;
-      r.current.lastCharIndex = abs;
-      setWordIndex(abs);
+      // Boundary events should only fire on the speaking utterance, but guard
+      // against engines that mis-route them to queued ones.
+      if (!isActive()) return;
+      // Recalibrate the estimator from this confirmed position so it
+      // extrapolates forward accurately between boundary events.
+      estBase = { charPos: e.charIndex, time: performance.now() };
+      applyChar(e.charIndex);
     };
 
     utterance.onend = () => {
       stopEstimator();
-      // Stale utterance (cancelled and replaced) — ignore
-      if (gen !== r.current.speakGen) return;
+      if (!isAlive()) return;
       if (!r.current.isPlaying || r.current.stopped) return;
-      advanceChunk(index);
+
+      // If we prefetched a successor batch, its onstart will take over the
+      // UI. Only the truly-last batch needs to wind things down.
+      if (nextIdx >= r.current.chunks.length) endOfText();
     };
 
     utterance.onerror = (e) => {
@@ -131,40 +243,27 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
       console.error('Speech error:', e.error);
     };
 
-    r.current.utterance = utterance;
     window.speechSynthesis.speak(utterance);
   }
 
-  function advanceChunk(index) {
-    const { chunks: ch } = r.current;
-    const next = index + 1;
-    if (next < ch.length) {
-      r.current.chunkIndex = next;
-      r.current.lastCharIndex = 0;
-      setChunkIndex(next);
-      setWordIndex(0);
-      // Guard: don't start next chunk if playback was paused/stopped in the
-      // moment between the utterance ending and this callback firing.
-      if (r.current.isPlaying) doSpeak(ch[next], next, 0);
-    } else {
-      // Reached end
-      r.current.isPlaying = false;
-      r.current.stopped = true;
-      r.current.chunkIndex = 0;
-      r.current.lastCharIndex = 0;
-      setIsPlaying(false);
-      setChunkIndex(0);
-      setWordIndex(0);
-    }
+  function endOfText() {
+    r.current.isPlaying = false;
+    r.current.stopped = true;
+    r.current.chunkIndex = 0;
+    r.current.lastCharIndex = 0;
+    r.current.activeGen = 0;
+    setIsPlaying(false);
+    setChunkIndex(0);
+    setWordIndex(0);
   }
 
   // ─── Settings change during playback ────────────────────────────────────────
 
   useEffect(() => {
     if (!r.current.isPlaying) return;
-    const { chunks: ch, chunkIndex: ci, lastCharIndex } = r.current;
+    const { chunkIndex: ci, lastCharIndex } = r.current;
     silenceAndCancel();
-    doSpeak(ch[ci], ci, lastCharIndex);
+    doSpeak(ci, lastCharIndex);
   }, [rate, pitch, volume, selectedVoice]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Public API ─────────────────────────────────────────────────────────────
@@ -178,18 +277,22 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
     setIsPlaying(true);
     setScrollTrigger(t => t + 1);
 
-    const { chunks: ch, chunkIndex: ci, lastCharIndex } = r.current;
+    const { chunkIndex: ci, lastCharIndex } = r.current;
     silenceAndCancel();
-    doSpeak(ch[ci], ci, lastCharIndex);
+    doSpeak(ci, lastCharIndex);
   }
 
   function silenceAndCancel() {
     // Zero volume first — silences audio immediately even if the browser
-    // delays the actual cancellation of the utterance.
+    // delays the actual cancellation of the currently-speaking utterance.
     if (r.current.utterance) {
       r.current.utterance.volume = 0;
       r.current.utterance = null;
     }
+    // Mark every utterance created so far as dead so their pending onend /
+    // onstart callbacks (including any prefetched-and-queued ones) no-op.
+    r.current.cancelThru = r.current.speakGen;
+    r.current.activeGen = 0;
     window.speechSynthesis.cancel();
   }
 
@@ -197,9 +300,6 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
     if (!r.current.isPlaying) return;
     r.current.isPlaying = false;
     r.current.paused = true;
-    // Bump speakGen so any in-flight onend or estimator tick becomes stale
-    // and won't trigger advanceChunk or update lastCharIndex after we pause.
-    ++r.current.speakGen;
     setIsPlaying(false);
     silenceAndCancel();
   }
@@ -208,14 +308,10 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
     r.current.isPlaying = false;
     r.current.paused = false;
     r.current.stopped = true;
-    // Bump speakGen so any in-flight onend from the last utterance can't
-    // trigger advanceChunk after stop() has already run.
-    ++r.current.speakGen;
-    r.current.chunkIndex = 0;
-    r.current.lastCharIndex = 0;
+    // Note: chunkIndex/lastCharIndex are intentionally preserved so the saved
+    // position in localStorage stays at where the user left off. Clicking
+    // Start again with the same text shows the resume prompt.
     setIsPlaying(false);
-    setChunkIndex(0);
-    setWordIndex(0);
     silenceAndCancel();
   }
 
@@ -229,7 +325,7 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
 
     if (r.current.isPlaying) {
       silenceAndCancel();
-      doSpeak(ch[newIndex], newIndex, 0);
+      doSpeak(newIndex, 0);
     }
   }
 
@@ -243,7 +339,7 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
 
     if (r.current.isPlaying) {
       silenceAndCancel();
-      doSpeak(ch[newIndex], newIndex, charOffset);
+      doSpeak(newIndex, charOffset);
     }
   }
 

@@ -1,9 +1,5 @@
 import { useRef, useEffect, forwardRef, memo, useMemo, useSyncExternalStore } from "react";
 
-// Number of chunks around the current one that get full per-word tokenization.
-// Chunks outside this window render as a single span (per-chunk click only).
-const TOKENIZE_WINDOW = 10;
-
 function tokenize(text) {
   const tokens = [];
   const regex = /(\S+|\s+)/g;
@@ -47,32 +43,6 @@ const CurrentChunk = forwardRef(function CurrentChunk(
           </span>
         );
       })}
-    </span>
-  );
-});
-
-const TokenizedChunk = memo(function TokenizedChunk({
-  text,
-  className,
-  chunkIndex,
-}) {
-  const tokens = useMemo(() => tokenize(text), [text]);
-  return (
-    <span className={className}>
-      {tokens.map((token, j) => {
-        const isWord = /\S/.test(token.text);
-        if (!isWord) return <span key={j}>{token.text}</span>;
-        return (
-          <span
-            key={j}
-            className="word-clickable"
-            data-chunk={chunkIndex}
-            data-offset={token.start}
-          >
-            {token.text}
-          </span>
-        );
-      })}{" "}
     </span>
   );
 });
@@ -132,7 +102,6 @@ export default function TextDisplay({
         {chunks.map((chunk, i) => {
           const isPast = i < chunkIndex;
           const isCurrent = i === chunkIndex;
-          const inWindow = Math.abs(i - chunkIndex) <= TOKENIZE_WINDOW;
           const className = isPast ? "chunk-past" : "chunk-future";
 
           if (isCurrent) {
@@ -146,17 +115,6 @@ export default function TextDisplay({
                   getWordIndex={getWordIndex}
                 />{" "}
               </span>
-            );
-          }
-
-          if (inWindow) {
-            return (
-              <TokenizedChunk
-                key={i}
-                text={chunk}
-                className={className}
-                chunkIndex={i}
-              />
             );
           }
 

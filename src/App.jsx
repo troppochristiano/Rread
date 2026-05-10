@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useVoices } from "./hooks/useVoices";
 import {
   usePersistence,
@@ -68,7 +68,17 @@ export default function App() {
   const { isPlaying, chunkIndex, subscribeWordIndex, getWordIndex, scrollTrigger, play, pause, stop, skip, seekTo } =
     useSpeech({ chunks, selectedVoice, rate, pitch, volume });
 
-  usePersistence({ text, chunkIndex, chunks });
+  const { clearPosition } = usePersistence({ text, chunkIndex, chunks });
+
+  // When playback ends naturally (isPlaying→false, chunkIndex resets to 0),
+  // clear the saved position so Start begins from the top next time.
+  const prevIsPlayingRef = useRef(false);
+  useEffect(() => {
+    if (prevIsPlayingRef.current && !isPlaying && chunkIndex === 0) {
+      clearPosition();
+    }
+    prevIsPlayingRef.current = isPlaying;
+  }, [isPlaying, chunkIndex, clearPosition]);
 
   useEffect(() => {
     if (pendingPlay && view === "player") {
@@ -80,7 +90,7 @@ export default function App() {
   function handleStart() {
     if (!text.trim()) return;
     const saved = getSavedPositionForText(text);
-    if (saved && saved.pct > 1) {
+    if (saved && saved.index > 0) {
       setResumePosition(saved);
     } else {
       seekTo(0);
@@ -91,6 +101,7 @@ export default function App() {
 
   function handleRestart() {
     setResumePosition(null);
+    clearPosition();
     seekTo(0);
     setView("player");
     setPendingPlay(true);
@@ -179,6 +190,7 @@ export default function App() {
           position={resumePosition}
           onResume={handleResume}
           onRestart={handleRestart}
+          onDismiss={() => setResumePosition(null)}
           t={t}
         />
       )}
