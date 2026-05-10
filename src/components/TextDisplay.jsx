@@ -2,7 +2,7 @@ import { useRef, useEffect, forwardRef, memo, useMemo, useSyncExternalStore } fr
 
 // Number of chunks around the current one that get full per-word tokenization.
 // Chunks outside this window render as a single span (per-chunk click only).
-const TOKENIZE_WINDOW = 30;
+const TOKENIZE_WINDOW = 10;
 
 function tokenize(text) {
   const tokens = [];
