@@ -1,4 +1,5 @@
-// SVG icon primitives
+import { useState } from 'react';
+
 function IconStop() {
   return (
     <svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor">
@@ -41,22 +42,55 @@ function IconPause() {
 export default function Player({
   isPlaying, chunkIndex, chunks,
   play, pause, stop, skip, seekTo, t,
+  onCenterActive,
 }) {
   const total = chunks.length;
   const pct = total > 0 ? (chunkIndex / total) * 100 : 0;
+  const [hoverPct, setHoverPct] = useState(null);
 
   function handleProgressClick(e) {
     const rect = e.currentTarget.getBoundingClientRect();
-    const ratio = (e.clientX - rect.left) / rect.width;
+    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     seekTo(Math.round(ratio * (total - 1)));
   }
 
+  function handleMouseMove(e) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    setHoverPct(ratio * 100);
+  }
+
+  const hoverSentence = hoverPct !== null && total > 0
+    ? Math.round((hoverPct / 100) * (total - 1)) + 1
+    : null;
+
+  const isHovering = hoverPct !== null;
+
   return (
     <div className="player-bar">
-      {/* Progress bar */}
-      <div className="progress-track" onClick={handleProgressClick} title="Clicca per saltare">
-        <div className="progress-fill" style={{ width: `${pct.toFixed(1)}%` }} />
-        <div className="progress-thumb" style={{ left: `${pct.toFixed(1)}%` }} />
+      {/* Progress bar — fixed-height wrapper keeps layout stable during bar expansion */}
+      <div
+        className={`progress-track${isHovering ? ' hovered' : ''}`}
+        onClick={handleProgressClick}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={() => setHoverPct(null)}
+      >
+        <div className="progress-bar">
+          <div className="progress-fill" style={{ width: `${pct.toFixed(1)}%` }} />
+        </div>
+
+        {/* Thumb sits at playback position, pops in on hover */}
+        <div
+          className={`progress-thumb${isHovering ? ' visible' : ''}`}
+          style={{ left: `${pct.toFixed(1)}%` }}
+        />
+
+        {/* Tooltip follows cursor, shows where click will jump to */}
+        {isHovering && (
+          <div className="progress-tooltip" style={{ left: `${hoverPct.toFixed(1)}%` }}>
+            {hoverSentence}/{total}
+          </div>
+        )}
       </div>
 
       <div className="progress-info">
@@ -78,9 +112,14 @@ export default function Player({
         <button className="ctrl-btn" onClick={() => skip(1)} title="Frase successiva">
           <IconSkipForward />
         </button>
-        <div className={`playing-dots${isPlaying ? ' active' : ''}`} aria-hidden="true">
+        <button
+          type="button"
+          className={`playing-dots${isPlaying ? ' active' : ''}`}
+          onClick={onCenterActive}
+          title="Vai al testo evidenziato"
+        >
           <span /><span /><span />
-        </div>
+        </button>
       </div>
     </div>
   );

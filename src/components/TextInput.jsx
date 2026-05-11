@@ -20,6 +20,8 @@ export default function TextInput({
         pitch={pitch} setPitch={setPitch}
         volume={volume} setVolume={setVolume}
         t={t}
+        allowPreview
+        previewText={text}
       />
 
       <textarea

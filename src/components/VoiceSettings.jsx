@@ -1,3 +1,5 @@
+import { useEffect, useRef, useState } from "react";
+
 const LANG_NAMES = new Intl.DisplayNames([navigator.language, "en"], {
   type: "language",
 });
@@ -33,35 +35,135 @@ function groupVoicesByLang(voices) {
   }));
 }
 
+const PREVIEW_FALLBACK = {
+  it: "Ciao, questa è un'anteprima della voce.",
+  en: "Hello, this is a quick voice preview.",
+  es: "Hola, esta es una breve muestra de la voz.",
+  fr: "Bonjour, ceci est un aperçu de la voix.",
+  de: "Hallo, dies ist eine kurze Sprachvorschau.",
+  pt: "Olá, esta é uma breve amostra da voz.",
+};
+
+function buildPreviewText(text, voice) {
+  const trimmed = (text || "").trim();
+  if (trimmed) {
+    const match = trimmed.match(/^[\s\S]{1,140}?[.!?](?=\s|$)/);
+    const snippet = (match ? match[0] : trimmed.slice(0, 140)).trim();
+    if (snippet) return snippet;
+  }
+  const base = (voice?.lang || "en").split("-")[0].toLowerCase();
+  return PREVIEW_FALLBACK[base] || PREVIEW_FALLBACK.en;
+}
+
+function IconPlay() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor">
+      <path d="M2.5 1.5v9l8-4.5z" />
+    </svg>
+  );
+}
+
+function IconStop() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor">
+      <rect x="2.5" y="2.5" width="7" height="7" />
+    </svg>
+  );
+}
+
 export default function VoiceSettings({
   voices, selectedVoice, setSelectedVoice,
   rate, setRate, pitch, setPitch, volume, setVolume, t,
+  allowPreview = false, previewText = "",
 }) {
   const groups = groupVoicesByLang(voices);
+  const [isPreviewing, setIsPreviewing] = useState(false);
+  const activeRef = useRef(false);
+
+  useEffect(() => {
+    return () => {
+      if (activeRef.current) {
+        window.speechSynthesis.cancel();
+        activeRef.current = false;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (activeRef.current) {
+      window.speechSynthesis.cancel();
+      activeRef.current = false;
+      setIsPreviewing(false);
+    }
+  }, [selectedVoice?.name]);
+
+  function handlePreview() {
+    if (!allowPreview || !selectedVoice) return;
+    if (activeRef.current) {
+      window.speechSynthesis.cancel();
+      activeRef.current = false;
+      setIsPreviewing(false);
+      return;
+    }
+    const u = new SpeechSynthesisUtterance(
+      buildPreviewText(previewText, selectedVoice),
+    );
+    u.voice = selectedVoice;
+    u.lang = selectedVoice.lang;
+    u.rate = rate;
+    u.pitch = pitch;
+    u.volume = volume;
+    u.onend = () => {
+      activeRef.current = false;
+      setIsPreviewing(false);
+    };
+    u.onerror = () => {
+      activeRef.current = false;
+      setIsPreviewing(false);
+    };
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(u);
+    activeRef.current = true;
+    setIsPreviewing(true);
+  }
 
   return (
     <div className="voice-settings">
       <div className="setting-row">
         <label className="setting-label">{t.voice}</label>
-        <select
-          className="voice-select"
-          value={selectedVoice?.name || ""}
-          onChange={(e) =>
-            setSelectedVoice(
-              voices.find((v) => v.name === e.target.value) || null,
-            )
-          }
-        >
-          {groups.map(({ base, label, voices: groupVoices }) => (
-            <optgroup key={base} label={label}>
-              {groupVoices.map((v) => (
-                <option key={v.name} value={v.name}>
-                  {v.name} ({v.lang})
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
+        <div className="voice-select-row">
+          <select
+            className="voice-select"
+            value={selectedVoice?.name || ""}
+            onChange={(e) =>
+              setSelectedVoice(
+                voices.find((v) => v.name === e.target.value) || null,
+              )
+            }
+          >
+            {groups.map(({ base, label, voices: groupVoices }) => (
+              <optgroup key={base} label={label}>
+                {groupVoices.map((v) => (
+                  <option key={v.name} value={v.name}>
+                    {v.name} ({v.lang})
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          {allowPreview && (
+            <button
+              type="button"
+              className={`voice-preview-btn ${isPreviewing ? "playing" : ""}`}
+              onClick={handlePreview}
+              disabled={!selectedVoice}
+              title={isPreviewing ? t.stopPreview : t.preview}
+              aria-label={isPreviewing ? t.stopPreview : t.preview}
+            >
+              {isPreviewing ? <IconStop /> : <IconPlay />}
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="sliders">

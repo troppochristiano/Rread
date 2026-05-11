@@ -54,7 +54,7 @@ const PlainChunk = memo(function PlainChunk({ text, className, chunkIndex }) {
       data-chunk={chunkIndex}
       data-offset={0}
     >
-      {text}{" "}
+      {text}
     </span>
   );
 });
@@ -65,6 +65,7 @@ export default function TextDisplay({
   subscribeWordIndex,
   getWordIndex,
   scrollTrigger,
+  scrollBump,
   seekTo,
 }) {
   const containerRef = useRef(null);
@@ -83,7 +84,7 @@ export default function TextDisplay({
     const relativeTop = elRect.top - containerRect.top + container.scrollTop;
     const target = relativeTop - container.clientHeight * 0.28;
     container.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
-  }, [chunkIndex, scrollTrigger]);
+  }, [chunkIndex, scrollTrigger, scrollBump]);
 
   // Single delegated click handler — reads data attrs from the clicked word.
   function handleClick(e) {
@@ -104,27 +105,24 @@ export default function TextDisplay({
           const isCurrent = i === chunkIndex;
           const className = isPast ? "chunk-past" : "chunk-future";
 
-          if (isCurrent) {
-            return (
-              <span key={i}>
+          return (
+            <div key={i} className="chunk-row">
+              {isCurrent ? (
                 <CurrentChunk
                   ref={activeRef}
                   text={chunk}
                   chunkIndex={i}
                   subscribeWordIndex={subscribeWordIndex}
                   getWordIndex={getWordIndex}
-                />{" "}
-              </span>
-            );
-          }
-
-          return (
-            <PlainChunk
-              key={i}
-              text={chunk}
-              className={className}
-              chunkIndex={i}
-            />
+                />
+              ) : (
+                <PlainChunk
+                  text={chunk}
+                  className={className}
+                  chunkIndex={i}
+                />
+              )}
+            </div>
           );
         })}
       </div>

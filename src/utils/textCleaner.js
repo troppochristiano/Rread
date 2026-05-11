@@ -106,6 +106,7 @@ export function cleanTextForSpeech(text) {
 
   // Collapse whitespace
   t = t.replace(/\n{3,}/g, '\n\n');
+  t = t.replace(/(?<!\n)\n(?!\n)/g, ' ');
   t = t.replace(/[ \t]+/g, ' ');
 
   return t.trim();
