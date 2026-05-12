@@ -92,13 +92,41 @@ export default function TextDisplay({
   getWordIndex,
   scrollTrigger,
   scrollBump,
+  isPlaying,
+  rate,
   seekTo,
 }) {
   const containerRef = useRef(null);
   const activeRef = useRef(null);
+  // Set when the user explicitly scrolls (wheel/touch/keys). The auto-scroll
+  // effect resets this on each run, so the loop resumes only on its restart
+  // triggers: play, 3-dots click, or a new batch.
+  const userScrolledRef = useRef(false);
+  // Anchors the tracking-scroll curve to the moment the current batch began.
+  // Keyed by batch identity so 3-dots / scroll-bump re-runs keep the original
+  // start time and resume scrolling from where the curve would be by now.
+  const batchAnchorRef = useRef({ key: "", animStart: 0 });
 
-  // Auto-scroll: bring active chunk to ~28% from top of container
   useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const onUserScroll = () => { userScrolledRef.current = true; };
+    container.addEventListener("wheel", onUserScroll, { passive: true });
+    container.addEventListener("touchmove", onUserScroll, { passive: true });
+    container.addEventListener("keydown", onUserScroll);
+    return () => {
+      container.removeEventListener("wheel", onUserScroll);
+      container.removeEventListener("touchmove", onUserScroll);
+      container.removeEventListener("keydown", onUserScroll);
+    };
+  }, []);
+
+  // Auto-scroll: bring active chunk to ~28% from top, then for cloud-voice
+  // batches that overflow the viewport, smoothly track through the batch
+  // over its estimated duration so the reader can follow along.
+  useEffect(() => {
+    userScrolledRef.current = false;
+
     const container = containerRef.current;
     const el = activeRef.current;
     if (!container || !el) return;
@@ -106,9 +134,64 @@ export default function TextDisplay({
     const containerRect = container.getBoundingClientRect();
     const elRect = el.getBoundingClientRect();
     const relativeTop = elRect.top - containerRect.top + container.scrollTop;
-    const target = relativeTop - container.clientHeight * 0.28;
-    container.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
-  }, [chunkIndex, scrollTrigger, scrollBump]);
+    const containerH = container.clientHeight;
+    const startScroll = Math.max(0, relativeTop - containerH * 0.28);
+
+    let initialScroll = startScroll;
+    let tracking = null;
+
+    if (isPlaying && batchEndIndex > chunkIndex && chunks) {
+      const endEl = container.querySelector(`[data-chunk="${batchEndIndex}"]`);
+      if (endEl) {
+        const endRect = endEl.getBoundingClientRect();
+        const endBottom = endRect.bottom - containerRect.top + container.scrollTop;
+        const endScroll = Math.max(startScroll, endBottom - containerH * 0.72);
+        if (endScroll > startScroll + 8) {
+          let totalChars = 0;
+          for (let i = chunkIndex; i <= batchEndIndex; i++) {
+            totalChars += (chunks[i] || "").length;
+          }
+          // ~18 chars/sec at rate=1 is a reasonable cross-voice average for
+          // English cloud voices; only approximate since they give no
+          // progress info.
+          const charsPerSec = 18 * Math.max(0.1, rate || 1);
+          const durationMs = (totalChars / charsPerSec) * 1000;
+
+          // Same audio segment → keep the original animStart so 3-dots /
+          // play-resume snap-backs land at the position the autoscroller
+          // would have reached by now.
+          const batchKey = `${chunkIndex}-${batchEndIndex}-${scrollTrigger}`;
+          if (batchAnchorRef.current.key !== batchKey) {
+            batchAnchorRef.current = { key: batchKey, animStart: performance.now() };
+          }
+          const animStart = batchAnchorRef.current.animStart;
+          const elapsed = Math.max(0, performance.now() - animStart);
+          const initialT = Math.min(1, elapsed / durationMs);
+          initialScroll = startScroll + (endScroll - startScroll) * initialT;
+
+          tracking = { animStart, durationMs, startScroll, endScroll };
+        }
+      }
+    }
+
+    container.scrollTo({ top: initialScroll, behavior: "smooth" });
+    if (!tracking) return;
+
+    // Delay so the initial smooth scroll can settle before we take over with
+    // direct scrollTop writes (uses wall time, not the animStart anchor).
+    const tickStartTime = performance.now() + 400;
+    let rafId = requestAnimationFrame(function tick(now) {
+      if (userScrolledRef.current) return;
+      if (now < tickStartTime) {
+        rafId = requestAnimationFrame(tick);
+        return;
+      }
+      const t = Math.min(1, (now - tracking.animStart) / tracking.durationMs);
+      container.scrollTop = tracking.startScroll + (tracking.endScroll - tracking.startScroll) * t;
+      if (t < 1) rafId = requestAnimationFrame(tick);
+    });
+    return () => cancelAnimationFrame(rafId);
+  }, [chunkIndex, batchEndIndex, scrollTrigger, scrollBump, isPlaying, rate, chunks]);
 
   // Single delegated click handler — reads data attrs from the clicked word.
   function handleClick(e) {

@@ -115,15 +115,23 @@ export default function VoiceSettings({
     setIsPreviewing(true);
   }
 
-  // Restart preview (debounced) when settings change while it's playing,
-  // so users hear the effect of pitch/speed/volume/voice adjustments live.
+  // Restart preview (debounced) when sliders change while it's playing,
+  // so users hear the effect of pitch/speed/volume adjustments live.
   useEffect(() => {
     if (!activeRef.current) return;
     const id = setTimeout(() => {
       if (activeRef.current) startPreview();
     }, 200);
     return () => clearTimeout(id);
-  }, [rate, pitch, volume, selectedVoice?.name]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [rate, pitch, volume]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Stop preview when the selected voice changes mid-playback.
+  useEffect(() => {
+    if (!activeRef.current) return;
+    window.speechSynthesis.cancel();
+    activeRef.current = false;
+    setIsPreviewing(false);
+  }, [selectedVoice?.name]);
 
   function handlePreview() {
     if (!allowPreview || !selectedVoice) return;

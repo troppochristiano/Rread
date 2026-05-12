@@ -5,8 +5,9 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 // rather than estimating which sentence inside the batch is being spoken.
 const ESTIMATOR_GRACE_MS = 250;
 // If boundary events arrive and then go silent mid-utterance, fall back to
-// whole-batch highlight after this many ms of silence.
-const BOUNDARY_SILENCE_MS = 800;
+// whole-batch highlight after this many ms of silence. Long enough that
+// natural pauses between sentences don't briefly flash the whole batch.
+const BOUNDARY_SILENCE_MS = 3000;
 
 // Chunks (paragraph-sized — the unit of display/seek/highlight) get batched
 // into larger utterances at speak-time. Each utterance carries an end-of-

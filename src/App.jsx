@@ -222,6 +222,8 @@ export default function App() {
             getWordIndex={getWordIndex}
             scrollTrigger={scrollTrigger}
             scrollBump={scrollBump}
+            isPlaying={isPlaying}
+            rate={rate}
             seekTo={seekTo}
           />
 

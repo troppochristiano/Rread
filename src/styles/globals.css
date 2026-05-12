@@ -465,6 +465,8 @@ select option, select optgroup { background: var(--paper); color: var(--ink); }
   border-top: 1px solid var(--ink);
   padding: 14px 24px 18px;
   flex-shrink: 0;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* Fixed-height wrapper is always 20px — bar expands inside without layout shift */
