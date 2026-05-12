@@ -75,9 +75,11 @@ export default function VoiceSettings({
   voices, selectedVoice, setSelectedVoice,
   rate, setRate, pitch, setPitch, volume, setVolume, t,
   allowPreview = false, previewText = "",
+  slidersCollapsible = false,
 }) {
   const groups = groupVoicesByLang(voices);
   const [isPreviewing, setIsPreviewing] = useState(false);
+  const [slidersOpen, setSlidersOpen] = useState(false);
   const activeRef = useRef(false);
 
   useEffect(() => {
@@ -89,22 +91,8 @@ export default function VoiceSettings({
     };
   }, []);
 
-  useEffect(() => {
-    if (activeRef.current) {
-      window.speechSynthesis.cancel();
-      activeRef.current = false;
-      setIsPreviewing(false);
-    }
-  }, [selectedVoice?.name]);
-
-  function handlePreview() {
-    if (!allowPreview || !selectedVoice) return;
-    if (activeRef.current) {
-      window.speechSynthesis.cancel();
-      activeRef.current = false;
-      setIsPreviewing(false);
-      return;
-    }
+  function startPreview() {
+    if (!selectedVoice) return;
     const u = new SpeechSynthesisUtterance(
       buildPreviewText(previewText, selectedVoice),
     );
@@ -127,6 +115,27 @@ export default function VoiceSettings({
     setIsPreviewing(true);
   }
 
+  // Restart preview (debounced) when settings change while it's playing,
+  // so users hear the effect of pitch/speed/volume/voice adjustments live.
+  useEffect(() => {
+    if (!activeRef.current) return;
+    const id = setTimeout(() => {
+      if (activeRef.current) startPreview();
+    }, 200);
+    return () => clearTimeout(id);
+  }, [rate, pitch, volume, selectedVoice?.name]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function handlePreview() {
+    if (!allowPreview || !selectedVoice) return;
+    if (activeRef.current) {
+      window.speechSynthesis.cancel();
+      activeRef.current = false;
+      setIsPreviewing(false);
+      return;
+    }
+    startPreview();
+  }
+
   return (
     <div className="voice-settings">
       <div className="setting-row">
@@ -134,6 +143,7 @@ export default function VoiceSettings({
         <div className="voice-select-row">
           <select
             className="voice-select"
+            aria-label={t.voice}
             value={selectedVoice?.name || ""}
             onChange={(e) =>
               setSelectedVoice(
@@ -166,52 +176,73 @@ export default function VoiceSettings({
         </div>
       </div>
 
-      <div className="sliders">
-        <div className="slider-row">
-          <label className="slider-label">
-            <span>{t.speed}</span>
-            <span className="slider-value">{rate.toFixed(2)}×</span>
-          </label>
-          <input
-            type="range"
-            min="0.5"
-            max="1.5"
-            step="0.05"
-            value={rate}
-            onChange={(e) => setRate(parseFloat(e.target.value))}
-          />
-        </div>
+      {slidersCollapsible && (
+        <button
+          type="button"
+          className={`sliders-toggle ${slidersOpen ? "open" : ""}`}
+          onClick={() => setSlidersOpen((o) => !o)}
+        >
+          <span>{t.slidersLabel}</span>
+          <svg width="10" height="7" viewBox="0 0 12 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+            <path d="M1 1l5 5 5-5" />
+          </svg>
+        </button>
+      )}
 
-        <div className="slider-row">
-          <label className="slider-label">
-            <span>{t.pitch}</span>
-            <span className="slider-value">{pitch.toFixed(2)}</span>
-          </label>
-          <input
-            type="range"
-            min="0.10"
-            max="1.80"
-            step="0.05"
-            value={pitch}
-            onChange={(e) => setPitch(parseFloat(e.target.value))}
-          />
-        </div>
+      {(!slidersCollapsible || slidersOpen) && (
+        <div className="sliders">
+          <div className="slider-row">
+            <label className="slider-label">
+              <span>{t.speed}</span>
+              <span className="slider-value">{rate.toFixed(2)}×</span>
+            </label>
+            <input
+              type="range"
+              min="0.5"
+              max="1.5"
+              step="0.05"
+              value={rate}
+              aria-label={t.speed}
+              aria-valuetext={`${rate.toFixed(2)}×`}
+              onChange={(e) => setRate(parseFloat(e.target.value))}
+            />
+          </div>
 
-        <div className="slider-row">
-          <label className="slider-label">
-            <span>{t.volume}</span>
-            <span className="slider-value">{Math.round(volume * 100)}%</span>
-          </label>
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.05"
-            value={volume}
-            onChange={(e) => setVolume(parseFloat(e.target.value))}
-          />
+          <div className="slider-row">
+            <label className="slider-label">
+              <span>{t.pitch}</span>
+              <span className="slider-value">{pitch.toFixed(2)}</span>
+            </label>
+            <input
+              type="range"
+              min="0.10"
+              max="1.80"
+              step="0.05"
+              value={pitch}
+              aria-label={t.pitch}
+              aria-valuetext={pitch.toFixed(2)}
+              onChange={(e) => setPitch(parseFloat(e.target.value))}
+            />
+          </div>
+
+          <div className="slider-row">
+            <label className="slider-label">
+              <span>{t.volume}</span>
+              <span className="slider-value">{Math.round(volume * 100)}%</span>
+            </label>
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              value={volume}
+              aria-label={t.volume}
+              aria-valuetext={`${Math.round(volume * 100)}%`}
+              onChange={(e) => setVolume(parseFloat(e.target.value))}
+            />
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

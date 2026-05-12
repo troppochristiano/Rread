@@ -2,6 +2,7 @@ const ABBREV_RE = /\b(Dr|Dott|Sig|Ing|Prof|Gen|Col|Mr|Mrs|Ms|Sr|Jr)\./g;
 const PLACEHOLDER = '\x00';
 
 function restore(text) {
+  // eslint-disable-next-line no-control-regex
   return text.replace(/\x00/g, '.');
 }
 

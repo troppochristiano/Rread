@@ -100,23 +100,24 @@ export default function Player({
 
       {/* Controls */}
       <div className="player-controls">
-        <button className="ctrl-btn" onClick={stop} title="Stop — torna all'input">
+        <button className="ctrl-btn" onClick={stop} title={t.stopTitle} aria-label={t.stopTitle}>
           <IconStop />
         </button>
-        <button className="ctrl-btn" onClick={() => skip(-1)} title="Frase precedente">
+        <button className="ctrl-btn" onClick={() => skip(-1)} title={t.prevSentence} aria-label={t.prevSentence}>
           <IconSkipBack />
         </button>
-        <button className="ctrl-btn play-pause-btn" onClick={isPlaying ? pause : play} title={isPlaying ? 'Pausa' : 'Riproduci'}>
+        <button className="ctrl-btn play-pause-btn" onClick={isPlaying ? pause : play} title={isPlaying ? t.pauseTitle : t.playTitle} aria-label={isPlaying ? t.pauseTitle : t.playTitle}>
           {isPlaying ? <IconPause /> : <IconPlay />}
         </button>
-        <button className="ctrl-btn" onClick={() => skip(1)} title="Frase successiva">
+        <button className="ctrl-btn" onClick={() => skip(1)} title={t.nextSentence} aria-label={t.nextSentence}>
           <IconSkipForward />
         </button>
         <button
           type="button"
           className={`playing-dots${isPlaying ? ' active' : ''}`}
           onClick={onCenterActive}
-          title="Vai al testo evidenziato"
+          title={t.goToHighlighted}
+          aria-label={t.goToHighlighted}
         >
           <span /><span /><span />
         </button>

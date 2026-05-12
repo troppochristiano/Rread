@@ -1,54 +1,12 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 
-// Grace period before deciding a voice doesn't support boundary events.
+// Grace period before deciding a voice doesn't emit boundary events. On
+// expiry the whole utterance batch is highlighted at once (cloud voices)
+// rather than estimating which sentence inside the batch is being spoken.
 const ESTIMATOR_GRACE_MS = 250;
-// Throttle for the chunk-level estimator.
-const ESTIMATOR_TICK_MS = 100;
-// If boundary events stop mid-utterance, switch to the chunk estimator after
-// this many ms of silence.
+// If boundary events arrive and then go silent mid-utterance, fall back to
+// whole-batch highlight after this many ms of silence.
 const BOUNDARY_SILENCE_MS = 800;
-// Fallback chars/sec for the first utterance before we have a measurement.
-// Only used for sentence-level chunk tracking now (word highlight is off for
-// boundary-less voices), so overshooting by one sentence is acceptable and
-// a higher value is better than visibly lagging behind the audio.
-const ESTIMATED_CHARS_PER_SECOND = 17;
-// Thresholds for trusting an onend-based rate measurement.
-const RATE_MEASURE_MIN_SECONDS = 0.5;
-const RATE_MEASURE_MIN_CHARS = 10;
-// Engines insert ~150-300ms of trailing silence before onend fires. Subtract
-// a constant so the measured chars/sec reflects actual speaking time.
-const TRAILING_SILENCE_MS = 150;
-
-// Per-(voice, rate) chars/sec cache. Chunk-level tracking only needs a rough
-// rate — a 10% error shifts the sentence highlight by ~1 sentence over a
-// 50s batch, which is fine. The cache makes even that error disappear by the
-// second session with a given voice.
-const RATE_CACHE_KEY = 'tts_measured_rates';
-
-function rateCacheRead() {
-  try { return JSON.parse(localStorage.getItem(RATE_CACHE_KEY)) || {}; }
-  catch { return {}; }
-}
-function rateCacheKey(voice, rate) {
-  if (!voice) return null;
-  const id = voice.voiceURI || voice.name;
-  return id ? `${id}|${Number(rate).toFixed(2)}` : null;
-}
-function rateCacheLookup(voice, rate) {
-  const key = rateCacheKey(voice, rate);
-  if (!key) return null;
-  const v = rateCacheRead()[key];
-  return typeof v === 'number' && isFinite(v) && v > 0 ? v : null;
-}
-function rateCacheStore(voice, rate, value) {
-  const key = rateCacheKey(voice, rate);
-  if (!key || !isFinite(value) || value <= 0) return;
-  try {
-    const cache = rateCacheRead();
-    cache[key] = value;
-    localStorage.setItem(RATE_CACHE_KEY, JSON.stringify(cache));
-  } catch {}
-}
 
 // Chunks (paragraph-sized — the unit of display/seek/highlight) get batched
 // into larger utterances at speak-time. Each utterance carries an end-of-
@@ -86,11 +44,11 @@ function findUtteranceBreak(text, maxLen) {
 // Pack chunks[startIdx..] (starting from `startCharOffset` within the first
 // chunk) into one utterance up to MAX_UTTERANCE_CHARS. Returns the joined
 // text plus a boundary table mapping char-positions-in-utterance back to the
-// originating display chunk, so `onboundary`/the estimator can flip the UI
-// to the right chunk as audio progresses through the batch. If the first
-// chunk alone exceeds the limit, splits it internally — the display chunk
-// stays one paragraph but the engine receives multiple utterances mapping
-// back to the same chunkIdx.
+// originating display chunk, so `onboundary` can flip the UI to the right
+// chunk as audio progresses through the batch. If the first chunk alone
+// exceeds the limit, splits it internally — the display chunk stays one
+// paragraph but the engine receives multiple utterances mapping back to the
+// same chunkIdx.
 function buildBatch(allChunks, startIdx, startCharOffset) {
   if (startIdx >= allChunks.length) return null;
   const firstSegment = allChunks[startIdx].slice(startCharOffset);
@@ -157,8 +115,13 @@ function resolveBoundary(charInUtterance, boundaries) {
 
 export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
   const [chunkIndex, setChunkIndex] = useState(0);
+  // Last chunkIdx of the active utterance's batch. When the voice emits
+  // boundary events, this stays === chunkIndex (single-sentence highlight).
+  // When it doesn't (cloud voices) we expand it to cover the whole batch.
+  const [batchEndIndex, setBatchEndIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [scrollTrigger, setScrollTrigger] = useState(0);
+  const [speechError, setSpeechError] = useState(null);
 
   // wordIndex is not React state — updates go directly to subscribers so only
   // CurrentChunk re-renders on each boundary event, not the entire App tree.
@@ -177,6 +140,7 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
 
   const r = useRef({
     chunkIndex: 0,
+    batchEndIndex: 0,
     isPlaying: false,
     paused: false,
     stopped: false,
@@ -189,9 +153,6 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
     speakGen: 0,
     cancelThru: 0,
     activeGen: 0,
-    // Measured chars/sec for the current voice+rate. Used only for chunk-level
-    // tracking (sentence advance) — does not drive word highlight.
-    measuredRate: null,
   });
 
   r.current.voice = selectedVoice;
@@ -200,16 +161,23 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
   r.current.volume = volume;
   r.current.chunks = chunks;
 
+  function writeChunkIndex(idx) {
+    if (r.current.chunkIndex !== idx) {
+      r.current.chunkIndex = idx;
+      setChunkIndex(idx);
+    }
+  }
+
+  function writeBatchEnd(idx) {
+    if (r.current.batchEndIndex !== idx) {
+      r.current.batchEndIndex = idx;
+      setBatchEndIndex(idx);
+    }
+  }
+
   // ─── Core speak function ────────────────────────────────────────────────────
 
   function doSpeak(startIdx, startCharOffset) {
-    // Warm-start from cache so sentence tracking is accurate from the first
-    // utterance with a known voice, not just from the second onward.
-    if (r.current.measuredRate == null) {
-      const cached = rateCacheLookup(r.current.voice, r.current.rate);
-      if (cached != null) r.current.measuredRate = cached;
-    }
-
     const batch = buildBatch(r.current.chunks, startIdx, startCharOffset);
     if (!batch) {
       const next = startIdx + 1;
@@ -222,6 +190,7 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
     }
 
     const { text, boundaries, nextIdx, nextCharOffset } = batch;
+    const endChunkIdx = boundaries[boundaries.length - 1].chunkIdx;
     const gen = ++r.current.speakGen;
 
     const utterance = new SpeechSynthesisUtterance(text);
@@ -231,10 +200,7 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
     utterance.volume = r.current.volume;
 
     let graceTimer = null;
-    let intervalId = null;
     let reArmTimer = null;
-    let estBase = { charPos: 0, time: 0 };
-    let utteranceStartTime = null;
     let lastResolvedChunk = -1;
 
     const isAlive = () => gen > r.current.cancelThru;
@@ -242,42 +208,27 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
 
     const clearTimers = () => {
       if (graceTimer !== null) { clearTimeout(graceTimer); graceTimer = null; }
-      if (intervalId !== null) { clearInterval(intervalId); intervalId = null; }
       if (reArmTimer !== null) { clearTimeout(reArmTimer); reArmTimer = null; }
     };
 
-    const startChunkEstimator = () => {
-      if (intervalId === null) intervalId = setInterval(tickChunk, ESTIMATOR_TICK_MS);
+    // Cloud-voice fallback: no boundary events to drive per-sentence tracking,
+    // so highlight everything from the current chunk through the end of the
+    // batch as one block until the next utterance starts.
+    const expandToBatch = () => {
+      setWordIndex(-1);
+      writeBatchEnd(endChunkIdx);
     };
 
-    // Advance the sentence (chunk) highlight via time estimate. Only updates
-    // chunkIndex — wordIndex stays at -1 for boundary-less voices.
-    const tickChunk = () => {
-      if (!isActive()) { clearInterval(intervalId); intervalId = null; return; }
-      const elapsedSec = (performance.now() - estBase.time) / 1000;
-      const charsPerSec = r.current.measuredRate ?? (ESTIMATED_CHARS_PER_SECOND * r.current.rate);
-      const estimated = Math.min(text.length - 1, Math.floor(estBase.charPos + elapsedSec * charsPerSec));
-      const { chunkIdx } = resolveBoundary(estimated, boundaries);
-      if (chunkIdx !== lastResolvedChunk) {
-        lastResolvedChunk = chunkIdx;
-        if (r.current.chunkIndex !== chunkIdx) {
-          r.current.chunkIndex = chunkIdx;
-          setChunkIndex(chunkIdx);
-        }
-      }
-    };
-
-    // Full update from an authoritative boundary event: advances both the
-    // sentence highlight and the word highlight within the sentence.
+    // Authoritative update from a boundary event: advances both the sentence
+    // highlight and the word highlight, and collapses any batch-wide highlight
+    // back to the single active chunk.
     const applyChar = (charInUtterance) => {
       const { chunkIdx, localChar } = resolveBoundary(charInUtterance, boundaries);
       if (chunkIdx !== lastResolvedChunk) {
         lastResolvedChunk = chunkIdx;
-        if (r.current.chunkIndex !== chunkIdx) {
-          r.current.chunkIndex = chunkIdx;
-          setChunkIndex(chunkIdx);
-        }
+        writeChunkIndex(chunkIdx);
       }
+      writeBatchEnd(chunkIdx);
       r.current.lastCharIndex = localChar;
       setWordIndex(localChar);
     };
@@ -287,26 +238,20 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
 
       r.current.activeGen = gen;
       r.current.utterance = utterance;
-      utteranceStartTime = performance.now();
-      estBase = { charPos: 0, time: utteranceStartTime };
 
       // Snap to first chunk of the batch immediately on audio start.
       const { chunkIdx } = resolveBoundary(0, boundaries);
-      if (chunkIdx !== lastResolvedChunk) {
-        lastResolvedChunk = chunkIdx;
-        if (r.current.chunkIndex !== chunkIdx) {
-          r.current.chunkIndex = chunkIdx;
-          setChunkIndex(chunkIdx);
-        }
-      }
+      lastResolvedChunk = chunkIdx;
+      writeChunkIndex(chunkIdx);
+      writeBatchEnd(chunkIdx);
 
-      // If no boundary event arrives in the grace window, start the chunk
-      // estimator — sentences will advance by time, but no word is highlighted.
+      // If no boundary event arrives in the grace window, expand the
+      // highlight to cover the whole batch. Cloud voices stay here for the
+      // duration of the utterance.
       graceTimer = setTimeout(() => {
         graceTimer = null;
         if (!isActive()) return;
-        setWordIndex(-1);
-        startChunkEstimator();
+        expandToBatch();
       }, ESTIMATOR_GRACE_MS);
 
       if (nextIdx < r.current.chunks.length && r.current.isPlaying) {
@@ -317,35 +262,21 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
     utterance.onboundary = (e) => {
       if (typeof e.charIndex !== 'number') return;
       if (!isActive()) return;
-      // A real boundary arrived — cancel the grace timer and stop any
-      // chunk estimator that was running (e.g. after a re-arm).
+      // A real boundary arrived — cancel the grace timer.
       if (graceTimer !== null) { clearTimeout(graceTimer); graceTimer = null; }
-      if (intervalId !== null) { clearInterval(intervalId); intervalId = null; }
-      estBase = { charPos: e.charIndex, time: performance.now() };
       applyChar(e.charIndex);
-      // Watchdog: if boundaries go silent, fall back to chunk estimator.
+      // Watchdog: if boundaries go silent, fall back to whole-batch highlight.
       if (reArmTimer !== null) clearTimeout(reArmTimer);
       reArmTimer = setTimeout(() => {
         reArmTimer = null;
         if (!isActive()) return;
-        setWordIndex(-1);
-        startChunkEstimator();
+        expandToBatch();
       }, BOUNDARY_SILENCE_MS);
     };
 
     utterance.onend = () => {
       clearTimers();
       if (!isAlive()) return;
-      // Measure chars/sec from total utterance duration. Used for chunk-level
-      // sentence tracking on the next utterance with this voice.
-      if (utteranceStartTime !== null) {
-        const duration = (performance.now() - utteranceStartTime) / 1000;
-        const speakingSeconds = Math.max(0.1, duration - TRAILING_SILENCE_MS / 1000);
-        if (speakingSeconds >= RATE_MEASURE_MIN_SECONDS && text.length >= RATE_MEASURE_MIN_CHARS) {
-          r.current.measuredRate = text.length / speakingSeconds;
-          rateCacheStore(r.current.voice, r.current.rate, r.current.measuredRate);
-        }
-      }
       if (!r.current.isPlaying || r.current.stopped) return;
       if (nextIdx >= r.current.chunks.length) endOfText();
     };
@@ -354,6 +285,9 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
       clearTimers();
       if (e.error === 'interrupted' || e.error === 'canceled') return;
       console.error('Speech error:', e.error);
+      r.current.isPlaying = false;
+      setIsPlaying(false);
+      setSpeechError(e.error);
     };
 
     window.speechSynthesis.speak(utterance);
@@ -363,10 +297,12 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
     r.current.isPlaying = false;
     r.current.stopped = true;
     r.current.chunkIndex = 0;
+    r.current.batchEndIndex = 0;
     r.current.lastCharIndex = 0;
     r.current.activeGen = 0;
     setIsPlaying(false);
     setChunkIndex(0);
+    setBatchEndIndex(0);
     setWordIndex(-1);
   }
 
@@ -374,10 +310,13 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
 
   useEffect(() => {
     if (!r.current.isPlaying) return;
-    r.current.measuredRate = rateCacheLookup(selectedVoice, rate);
-    const { chunkIndex: ci, lastCharIndex } = r.current;
-    silenceAndCancel();
-    doSpeak(ci, lastCharIndex);
+    const id = setTimeout(() => {
+      if (!r.current.isPlaying) return;
+      const { chunkIndex: ci, lastCharIndex } = r.current;
+      silenceAndCancel();
+      doSpeak(ci, lastCharIndex);
+    }, 300);
+    return () => clearTimeout(id);
   }, [rate, pitch, volume, selectedVoice]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Public API ─────────────────────────────────────────────────────────────
@@ -387,6 +326,7 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
     r.current.isPlaying = true;
     r.current.paused = false;
     r.current.stopped = false;
+    setSpeechError(null);
     setIsPlaying(true);
     setScrollTrigger(t => t + 1);
     const { chunkIndex: ci, lastCharIndex } = r.current;
@@ -416,6 +356,7 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
     r.current.isPlaying = false;
     r.current.paused = false;
     r.current.stopped = true;
+    setSpeechError(null);
     setIsPlaying(false);
     silenceAndCancel();
   }
@@ -424,8 +365,10 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
     const { chunks: ch } = r.current;
     const newIndex = Math.max(0, Math.min(ch.length - 1, r.current.chunkIndex + dir));
     r.current.chunkIndex = newIndex;
+    r.current.batchEndIndex = newIndex;
     r.current.lastCharIndex = 0;
     setChunkIndex(newIndex);
+    setBatchEndIndex(newIndex);
     setWordIndex(-1);
     if (r.current.isPlaying) {
       silenceAndCancel();
@@ -437,8 +380,10 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
     const { chunks: ch } = r.current;
     const newIndex = Math.max(0, Math.min(ch.length - 1, index));
     r.current.chunkIndex = newIndex;
+    r.current.batchEndIndex = newIndex;
     r.current.lastCharIndex = charOffset;
     setChunkIndex(newIndex);
+    setBatchEndIndex(newIndex);
     setWordIndex(charOffset);
     if (r.current.isPlaying) {
       silenceAndCancel();
@@ -450,5 +395,5 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
     return () => { silenceAndCancel(); };
   }, []);
 
-  return { isPlaying, chunkIndex, subscribeWordIndex, getWordIndex, scrollTrigger, play, pause, stop, skip, seekTo };
+  return { isPlaying, chunkIndex, batchEndIndex, subscribeWordIndex, getWordIndex, scrollTrigger, play, pause, stop, skip, seekTo, speechError, clearSpeechError: () => setSpeechError(null) };
 }

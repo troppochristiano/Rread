@@ -127,7 +127,6 @@ select option, select optgroup { background: var(--paper); color: var(--ink); }
   line-height: 1.8;
   padding: 16px 18px;
   resize: vertical;
-  transition: background 0.15s;
 }
 .text-area:focus {
   outline: 2px solid var(--ink);
@@ -164,6 +163,83 @@ select option, select optgroup { background: var(--paper); color: var(--ink); }
   box-shadow: none;
 }
 
+.textarea-wrap {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+.textarea-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 5px 0 0;
+}
+.import-btn {
+  background: none;
+  color: var(--ink-faded);
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border: 1px solid var(--ink-ghost);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.import-btn:hover:not(:disabled) {
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--ink);
+}
+.import-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+.import-formats {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--ink-faded);
+  flex: 1;
+  text-align: left;
+}
+.import-error {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: var(--ink);
+}
+
+/* ── Input-page settings wrapper ────────────────────────────────────────────── */
+.input-settings {
+  border: 1px solid var(--ink);
+}
+.input-settings .voice-settings {
+  border: none;
+  background: transparent;
+}
+
+.sliders-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-faded);
+  font-family: var(--font-mono);
+  padding: 8px 0 0;
+  border-top: 1px dashed var(--ink-ghost);
+  margin-top: 6px;
+}
+.sliders-toggle:hover { color: var(--ink); }
+.sliders-toggle svg { transition: transform 0.2s; flex-shrink: 0; }
+.sliders-toggle.open svg { transform: rotate(180deg); }
+
 /* ── Voice settings ─────────────────────────────────────────────────────────── */
 .voice-settings {
   background: transparent;
@@ -193,7 +269,6 @@ select option, select optgroup { background: var(--paper); color: var(--ink); }
   border: 1px solid var(--ink);
   background: var(--paper);
   color: var(--ink);
-  transition: background 0.15s, color 0.15s;
 }
 .voice-preview-btn:hover:not(:disabled) {
   background: var(--ink);
@@ -811,4 +886,82 @@ select option, select optgroup { background: var(--paper); color: var(--ink); }
     color: var(--ink);
     font-weight: 700;
   }
+}
+
+/* ── Keyboard help ──────────────────────────────────────────────────────────── */
+.keyboard-help {
+  position: relative;
+}
+
+.keyboard-help-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 99;
+}
+
+.keyboard-help-popup {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  background: var(--paper-warm);
+  border: 1px solid var(--ink-ghost);
+  padding: 10px 14px;
+  white-space: nowrap;
+  font-size: 12px;
+  z-index: 100;
+}
+
+.keyboard-help-title {
+  font-weight: 700;
+  margin-bottom: 8px;
+  color: var(--ink-faded);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+}
+
+.keyboard-help-popup table {
+  border-collapse: collapse;
+}
+
+.keyboard-help-popup td {
+  padding: 2px 0;
+}
+
+.keyboard-help-popup td:first-child {
+  font-weight: 700;
+  padding-right: 16px;
+  min-width: 48px;
+}
+
+.keyboard-help-popup td:last-child {
+  color: var(--ink-faded);
+}
+
+/* ── Speech error banner ────────────────────────────────────────────────────── */
+.speech-error-banner {
+  position: fixed;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--ink);
+  color: var(--paper);
+  padding: 10px 16px;
+  font-size: 13px;
+  white-space: nowrap;
+  z-index: 200;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.25);
+}
+
+.speech-error-banner button {
+  font-size: 16px;
+  line-height: 1;
+  opacity: 0.7;
+}
+
+.speech-error-banner button:hover {
+  opacity: 1;
 }

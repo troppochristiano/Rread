@@ -1,4 +1,6 @@
+import { useRef, useState } from "react";
 import VoiceSettings from "./VoiceSettings";
+import { importFileToText, ACCEPT_FILE_TYPES } from "../utils/fileImport";
 
 export default function TextInput({
   text, setText,
@@ -6,6 +8,27 @@ export default function TextInput({
   rate, setRate, pitch, setPitch, volume, setVolume,
   onStart, t,
 }) {
+  const fileInputRef = useRef(null);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState(null);
+
+  async function handleFileChange(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setImportError(null);
+    setImporting(true);
+    try {
+      const extracted = await importFileToText(file);
+      setText(extracted);
+    } catch (err) {
+      console.error("Import failed:", err);
+      setImportError(t.importError);
+    } finally {
+      setImporting(false);
+    }
+  }
+
   return (
     <div className="input-view">
       <header className="app-header">
@@ -13,26 +36,51 @@ export default function TextInput({
         <p className="app-sub">{t.subtitle}</p>
       </header>
 
-      <VoiceSettings
-        voices={voices}
-        selectedVoice={selectedVoice} setSelectedVoice={setSelectedVoice}
-        rate={rate} setRate={setRate}
-        pitch={pitch} setPitch={setPitch}
-        volume={volume} setVolume={setVolume}
-        t={t}
-        allowPreview
-        previewText={text}
-      />
+      <div className="input-settings">
+        <VoiceSettings
+          voices={voices}
+          selectedVoice={selectedVoice} setSelectedVoice={setSelectedVoice}
+          rate={rate} setRate={setRate}
+          pitch={pitch} setPitch={setPitch}
+          volume={volume} setVolume={setVolume}
+          t={t}
+          allowPreview
+          previewText={text}
+          slidersCollapsible
+        />
+      </div>
 
-      <textarea
-        className="text-area"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        placeholder={t.placeholder}
-        spellCheck={false}
-      />
+      <div className="textarea-wrap">
+        <textarea
+          className="text-area"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder={t.placeholder}
+          spellCheck={false}
+        />
+        <div className="textarea-toolbar">
+          <span className="import-formats">txt · md · pdf · epub</span>
+          {importError && <span className="import-error">{importError}</span>}
+          <button
+            type="button"
+            className="import-btn"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={importing}
+            title={t.importHint}
+          >
+            {importing ? t.importing : t.importBtn}
+          </button>
+        </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept={ACCEPT_FILE_TYPES}
+          onChange={handleFileChange}
+          style={{ display: "none" }}
+        />
+      </div>
 
-      <button className="start-btn" onClick={onStart} disabled={!text.trim()}>
+      <button className="start-btn" onClick={onStart} disabled={!text.trim() || importing}>
         {t.startBtn}
       </button>
     </div>

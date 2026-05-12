@@ -7,6 +7,7 @@ import {
 } from "./hooks/usePersistence";
 import { useSpeech } from "./hooks/useSpeech";
 import { useMediaSession } from "./hooks/useMediaSession";
+import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { cleanTextForSpeech } from "./utils/textCleaner";
 import { splitIntoSentences } from "./utils/textSplitter";
 import { translations } from "./i18n";
@@ -45,6 +46,15 @@ function IconInfo() {
   );
 }
 
+function IconKeyboard() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="6" width="20" height="12" rx="2"/>
+      <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8"/>
+    </svg>
+  );
+}
+
 function IconSliders() {
   return (
     <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
@@ -60,8 +70,20 @@ export default function App() {
   const { voices, selectedVoice, setSelectedVoice } = useVoices();
   const [text, setText] = useState(() => getInitialText());
 
-  const [theme, setTheme] = useState(() => localStorage.getItem("tts_theme") || "light");
-  const [locale, setLocale] = useState(() => localStorage.getItem("tts_locale") || "it");
+  const [theme, setTheme] = useState(() => {
+    const saved = localStorage.getItem("tts_theme");
+    if (saved) return saved;
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  });
+  const [locale, setLocale] = useState(() => {
+    const saved = localStorage.getItem("tts_locale");
+    if (saved && translations[saved]) return saved;
+    const browser = (navigator.language || "").toLowerCase();
+    for (const code of Object.keys(translations)) {
+      if (browser.startsWith(code)) return code;
+    }
+    return "en";
+  });
   const t = translations[locale];
 
   useEffect(() => {
@@ -82,16 +104,17 @@ export default function App() {
   const [resumePosition, setResumePosition] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [pendingPlay, setPendingPlay] = useState(false);
+  const pendingPlayRef = useRef(false);
   const [scrollBump, setScrollBump] = useState(0);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   const chunks = useMemo(
     () => splitIntoSentences(cleanTextForSpeech(text)),
     [text],
   );
 
-  const { isPlaying, chunkIndex, subscribeWordIndex, getWordIndex, scrollTrigger, play, pause, stop, skip, seekTo } =
+  const { isPlaying, chunkIndex, batchEndIndex, subscribeWordIndex, getWordIndex, scrollTrigger, play, pause, stop, skip, seekTo, speechError, clearSpeechError } =
     useSpeech({ chunks, selectedVoice, rate, pitch, volume });
 
   const { clearPosition } = usePersistence({ text, chunkIndex, chunks });
@@ -107,11 +130,11 @@ export default function App() {
   }, [isPlaying, chunkIndex, clearPosition]);
 
   useEffect(() => {
-    if (pendingPlay && view === "player") {
+    if (pendingPlayRef.current && view === "player") {
+      pendingPlayRef.current = false;
       play();
-      setPendingPlay(false);
     }
-  }, [pendingPlay, view]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [view]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleStart() {
     if (!text.trim()) return;
@@ -121,7 +144,7 @@ export default function App() {
     } else {
       seekTo(0);
       setView("player");
-      setPendingPlay(true);
+      pendingPlayRef.current = true;
     }
   }
 
@@ -130,14 +153,14 @@ export default function App() {
     clearPosition();
     seekTo(0);
     setView("player");
-    setPendingPlay(true);
+    pendingPlayRef.current = true;
   }
 
   function handleResume(pos) {
     setResumePosition(null);
     seekTo(pos.index);
     setView("player");
-    setPendingPlay(true);
+    pendingPlayRef.current = true;
   }
 
   function handleStop() {
@@ -150,6 +173,12 @@ export default function App() {
     const snippet = text.trim().split(/\s+/).slice(0, 8).join(" ");
     return snippet ? snippet.slice(0, 80) : "RRead";
   }, [text]);
+
+  useKeyboardShortcuts({
+    active: view === 'player',
+    isPlaying,
+    play, pause, stop: handleStop, skip,
+  });
 
   useMediaSession({
     title: docTitle,
@@ -180,7 +209,7 @@ export default function App() {
         <div className="player-view">
           <div className="player-header">
             <span className="player-title">RRead.</span>
-            <button className="corner-btn mobile-only player-header-settings" onClick={() => setMobileMenuOpen(o => !o)} title="Settings">
+            <button className="corner-btn mobile-only player-header-settings" onClick={() => setMobileMenuOpen(o => !o)} title={t.ariaMenuOpen} aria-label={t.ariaMenuOpen}>
               <IconSliders />
             </button>
           </div>
@@ -188,6 +217,7 @@ export default function App() {
           <TextDisplay
             chunks={chunks}
             chunkIndex={chunkIndex}
+            batchEndIndex={batchEndIndex}
             subscribeWordIndex={subscribeWordIndex}
             getWordIndex={getWordIndex}
             scrollTrigger={scrollTrigger}
@@ -242,21 +272,53 @@ export default function App() {
       )}
 
       <div className="corner-controls">
-        <button className="corner-btn desktop-only" onClick={() => setAboutOpen(true)} title="About">
+        <button className="corner-btn desktop-only" onClick={() => setAboutOpen(true)} title={t.about} aria-label={t.about}>
           <IconInfo />
         </button>
-        <button className="corner-btn desktop-only" onClick={() => setLocale(l => l === "it" ? "en" : "it")} title="Toggle language">
+        <div className="keyboard-help desktop-only">
+          <button
+            className="corner-btn"
+            onClick={() => setShortcutsOpen(o => !o)}
+            title={t.shortcutsTitle}
+            aria-label={t.shortcutsTitle}
+            aria-expanded={shortcutsOpen}
+          >
+            <IconKeyboard />
+          </button>
+          {shortcutsOpen && (
+            <>
+              <div className="keyboard-help-backdrop" onClick={() => setShortcutsOpen(false)} />
+              <div className="keyboard-help-popup" role="tooltip">
+                <div className="keyboard-help-title">{t.shortcutsTitle}</div>
+                <table><tbody>
+                  <tr><td>Space</td><td>{t.shortcutSpace.replace(/^Spazio — |^Space — /, '')}</td></tr>
+                  <tr><td>←</td><td>{t.shortcutLeft.replace(/^← — /, '')}</td></tr>
+                  <tr><td>→</td><td>{t.shortcutRight.replace(/^→ — /, '')}</td></tr>
+                  <tr><td>Esc</td><td>{t.shortcutEsc.replace(/^Esc — /, '')}</td></tr>
+                </tbody></table>
+              </div>
+            </>
+          )}
+        </div>
+        <button className="corner-btn desktop-only" onClick={() => setLocale(l => l === "it" ? "en" : "it")} title={t.ariaToggleLang} aria-label={t.ariaToggleLang}>
           {locale.toUpperCase()}
         </button>
-        <button className="corner-btn desktop-only" onClick={toggleTheme} title="Toggle theme">
+        <button className="corner-btn desktop-only" onClick={toggleTheme} title={theme === "dark" ? t.lightMode : t.darkMode} aria-label={theme === "dark" ? t.lightMode : t.darkMode}>
           {theme === "dark" ? <IconSun /> : <IconMoon />}
         </button>
         {view === "input" && (
-          <button className="corner-btn mobile-only" onClick={() => setMobileMenuOpen(o => !o)} title="Settings">
+          <button className="corner-btn mobile-only" onClick={() => setMobileMenuOpen(o => !o)} title={t.ariaMenuOpen} aria-label={t.ariaMenuOpen}>
             <IconSliders />
           </button>
         )}
       </div>
+
+      {speechError && (
+        <div className="speech-error-banner" role="alert">
+          <span>{t.speechError}</span>
+          <button onClick={clearSpeechError} aria-label="Dismiss">×</button>
+        </div>
+      )}
 
       {aboutOpen && <AboutModal locale={locale} onClose={() => setAboutOpen(false)} />}
 

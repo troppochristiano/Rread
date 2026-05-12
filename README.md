@@ -1,16 +1,33 @@
-# React + Vite
+# RRead
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A browser-based text-to-speech reader. Paste text or import a file and listen to it read aloud using your device's built-in speech voices.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- **File import** — TXT, MD, PDF, EPUB (PDF and EPUB parsed client-side, no server needed)
+- **Voice control** — choose any voice installed on the device; adjust speed, pitch, and volume
+- **Word-level highlighting** — the active word is highlighted in sync with speech
+- **Click to seek** — click any word in the text to jump playback to that position
+- **Session resume** — position is saved to localStorage; pick up where you left off
+- **Dark/light theme** — defaults to your OS preference, toggleable
+- **Locale** — UI in English or Italian, defaults to your browser language
 
-## React Compiler
+## Stack
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- React 19 + Vite
+- Web Speech API (no external TTS service)
+- pdfjs-dist, epub.js (loaded on demand)
 
-## Expanding the ESLint configuration
+## Run locally
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```bash
+npm install
+npm run dev
+```
+
+## Build
+
+```bash
+npm run build
+npm run preview   # serve the production build locally
+```

@@ -59,9 +59,35 @@ const PlainChunk = memo(function PlainChunk({ text, className, chunkIndex }) {
   );
 });
 
+// Like CurrentChunk but without the moving word highlight — used for the
+// non-leading chunks in an active batch (cloud voices) so each word stays
+// individually clickable to seek into.
+const BatchChunk = memo(function BatchChunk({ text, chunkIndex }) {
+  const tokens = useMemo(() => tokenize(text), [text]);
+  return (
+    <span className="chunk-current">
+      {tokens.map((token, j) => {
+        const isWord = /\S/.test(token.text);
+        if (!isWord) return <span key={j}>{token.text}</span>;
+        return (
+          <span
+            key={j}
+            className="word-clickable"
+            data-chunk={chunkIndex}
+            data-offset={token.start}
+          >
+            {token.text}
+          </span>
+        );
+      })}
+    </span>
+  );
+});
+
 export default function TextDisplay({
   chunks,
   chunkIndex,
+  batchEndIndex,
   subscribeWordIndex,
   getWordIndex,
   scrollTrigger,
@@ -70,8 +96,6 @@ export default function TextDisplay({
 }) {
   const containerRef = useRef(null);
   const activeRef = useRef(null);
-  const seekToRef = useRef(seekTo);
-  seekToRef.current = seekTo;
 
   // Auto-scroll: bring active chunk to ~28% from top of container
   useEffect(() => {
@@ -93,7 +117,7 @@ export default function TextDisplay({
     const ci = Number(target.dataset.chunk);
     const off = Number(target.dataset.offset);
     if (Number.isFinite(ci) && Number.isFinite(off)) {
-      seekToRef.current(ci, off);
+      seekTo(ci, off);
     }
   }
 
@@ -103,7 +127,10 @@ export default function TextDisplay({
         {chunks.map((chunk, i) => {
           const isPast = i < chunkIndex;
           const isCurrent = i === chunkIndex;
-          const className = isPast ? "chunk-past" : "chunk-future";
+          // Cloud voices (no boundary events) highlight the whole batch
+          // [chunkIndex..batchEndIndex] as a single block.
+          const isInBatch = i > chunkIndex && i <= (batchEndIndex ?? chunkIndex);
+          const plainClassName = isPast ? "chunk-past" : "chunk-future";
 
           return (
             <div key={i} className="chunk-row">
@@ -115,10 +142,12 @@ export default function TextDisplay({
                   subscribeWordIndex={subscribeWordIndex}
                   getWordIndex={getWordIndex}
                 />
+              ) : isInBatch ? (
+                <BatchChunk text={chunk} chunkIndex={i} />
               ) : (
                 <PlainChunk
                   text={chunk}
-                  className={className}
+                  className={plainClassName}
                   chunkIndex={i}
                 />
               )}
