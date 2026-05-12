@@ -71,11 +71,22 @@ function IconStop() {
   );
 }
 
+function IconRefresh() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M10.5 2v3h-3" />
+      <path d="M10.5 5A4.5 4.5 0 1 0 9 9.5" />
+    </svg>
+  );
+}
+
 export default function VoiceSettings({
   voices, selectedVoice, setSelectedVoice,
   rate, setRate, pitch, setPitch, volume, setVolume, t,
   allowPreview = false, previewText = "",
   slidersCollapsible = false,
+  isProbing = false, probeProgress = { done: 0, total: 0 }, onReprobe,
+  onPreviewActiveChange,
 }) {
   const groups = groupVoicesByLang(voices);
   const [isPreviewing, setIsPreviewing] = useState(false);
@@ -85,10 +96,12 @@ export default function VoiceSettings({
   useEffect(() => {
     return () => {
       if (activeRef.current) {
+        onPreviewActiveChange?.(false);
         window.speechSynthesis.cancel();
         activeRef.current = false;
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function startPreview() {
@@ -101,17 +114,19 @@ export default function VoiceSettings({
     u.rate = rate;
     u.pitch = pitch;
     u.volume = volume;
-    u.onend = () => {
+    const endPreview = () => {
       activeRef.current = false;
       setIsPreviewing(false);
+      onPreviewActiveChange?.(false);
     };
-    u.onerror = () => {
-      activeRef.current = false;
-      setIsPreviewing(false);
-    };
+    u.onend = endPreview;
+    u.onerror = endPreview;
+    // Signal BEFORE touching the speech queue so an in-flight probe sees the
+    // preview as user-active and bails out without cancelling our utterance.
+    onPreviewActiveChange?.(true);
+    activeRef.current = true;
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(u);
-    activeRef.current = true;
     setIsPreviewing(true);
   }
 
@@ -131,7 +146,8 @@ export default function VoiceSettings({
     window.speechSynthesis.cancel();
     activeRef.current = false;
     setIsPreviewing(false);
-  }, [selectedVoice?.name]);
+    onPreviewActiveChange?.(false);
+  }, [selectedVoice?.name]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handlePreview() {
     if (!allowPreview || !selectedVoice) return;
@@ -139,6 +155,7 @@ export default function VoiceSettings({
       window.speechSynthesis.cancel();
       activeRef.current = false;
       setIsPreviewing(false);
+      onPreviewActiveChange?.(false);
       return;
     }
     startPreview();
@@ -147,7 +164,9 @@ export default function VoiceSettings({
   return (
     <div className="voice-settings">
       <div className="setting-row">
-        <label className="setting-label">{t.voice}</label>
+        <label className="setting-label">
+          <span>{t.voice}</span>
+        </label>
         <div className="voice-select-row">
           <select
             className="voice-select"
@@ -199,6 +218,31 @@ export default function VoiceSettings({
 
       {(!slidersCollapsible || slidersOpen) && (
         <div className="sliders">
+          {onReprobe && (
+            <div className="slider-row reprobe-row">
+              <button
+                type="button"
+                className={`voice-reprobe-btn ${isProbing ? "probing" : ""}`}
+                onClick={onReprobe}
+                disabled={isProbing}
+                title={t.reprobeVoices}
+                aria-label={t.reprobeVoices}
+              >
+                <IconRefresh />
+                <span>{t.reprobeVoices}</span>
+              </button>
+              {isProbing && (
+                <div className="voice-probe-status" role="status" aria-live="polite">
+                  <span>
+                    {probeProgress.total > 0
+                      ? t.probingVoices(probeProgress.done, probeProgress.total)
+                      : t.probingVoicesSimple}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="slider-row">
             <label className="slider-label">
               <span>{t.speed}</span>

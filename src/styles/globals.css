@@ -291,6 +291,72 @@ select option, select optgroup { background: var(--paper); color: var(--ink); }
   letter-spacing: 0.15em;
   color: var(--ink);
   font-family: var(--font-mono);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.voice-reprobe-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--ink);
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+  border-radius: 0;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.reprobe-row {
+  grid-column: 1 / -1;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.voice-reprobe-btn:hover:not(:disabled) {
+  background: var(--ink);
+  color: var(--paper);
+}
+.voice-reprobe-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.voice-reprobe-btn.probing svg {
+  animation: voice-reprobe-spin 1s linear infinite;
+}
+@keyframes voice-reprobe-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.voice-probe-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.7rem;
+  font-family: var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink);
+  opacity: 0.75;
+}
+.voice-probe-spinner {
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: voice-reprobe-spin 0.8s linear infinite;
+  flex-shrink: 0;
 }
 
 .sliders {

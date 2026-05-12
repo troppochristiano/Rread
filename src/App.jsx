@@ -67,7 +67,7 @@ function IconSliders() {
 }
 
 export default function App() {
-  const { voices, selectedVoice, setSelectedVoice } = useVoices();
+  const { voices, selectedVoice, setSelectedVoice, isProbing, probeProgress, reprobe, setUserPlaying, setPreviewActive } = useVoices();
   const [text, setText] = useState(() => getInitialText());
 
   const [theme, setTheme] = useState(() => {
@@ -117,6 +117,12 @@ export default function App() {
   const { isPlaying, chunkIndex, batchEndIndex, subscribeWordIndex, getWordIndex, scrollTrigger, play, pause, stop, skip, seekTo, speechError, clearSpeechError } =
     useSpeech({ chunks, selectedVoice, rate, pitch, volume });
 
+  // Pause the voice probe while the user is listening so probe utterances
+  // don't fight with playback for the speech queue.
+  useEffect(() => {
+    setUserPlaying(isPlaying);
+  }, [isPlaying, setUserPlaying]);
+
   const { clearPosition } = usePersistence({ text, chunkIndex, chunks });
 
   // When playback ends naturally (isPlaying→false, chunkIndex resets to 0),
@@ -142,6 +148,7 @@ export default function App() {
     if (saved && saved.index > 0) {
       setResumePosition(saved);
     } else {
+      setUserPlaying(true);
       seekTo(0);
       setView("player");
       pendingPlayRef.current = true;
@@ -149,6 +156,7 @@ export default function App() {
   }
 
   function handleRestart() {
+    setUserPlaying(true);
     setResumePosition(null);
     clearPosition();
     seekTo(0);
@@ -157,6 +165,7 @@ export default function App() {
   }
 
   function handleResume(pos) {
+    setUserPlaying(true);
     setResumePosition(null);
     seekTo(pos.index);
     setView("player");
@@ -201,6 +210,10 @@ export default function App() {
           pitch={pitch} setPitch={setPitch}
           volume={volume} setVolume={setVolume}
           onStart={handleStart}
+          isProbing={isProbing}
+          probeProgress={probeProgress}
+          onReprobe={reprobe}
+          onPreviewActiveChange={setPreviewActive}
           t={t}
         />
       )}
@@ -245,6 +258,10 @@ export default function App() {
                   rate={rate} setRate={setRate}
                   pitch={pitch} setPitch={setPitch}
                   volume={volume} setVolume={setVolume}
+                  isProbing={isProbing}
+                  probeProgress={probeProgress}
+                  onReprobe={reprobe}
+                  onPreviewActiveChange={setPreviewActive}
                   t={t}
                 />
               </div>

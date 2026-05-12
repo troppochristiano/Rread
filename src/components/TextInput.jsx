@@ -7,6 +7,7 @@ export default function TextInput({
   voices, selectedVoice, setSelectedVoice,
   rate, setRate, pitch, setPitch, volume, setVolume,
   onStart, t,
+  isProbing, probeProgress, onReprobe, onPreviewActiveChange,
 }) {
   const fileInputRef = useRef(null);
   const [importing, setImporting] = useState(false);
@@ -47,6 +48,10 @@ export default function TextInput({
           allowPreview
           previewText={text}
           slidersCollapsible
+          isProbing={isProbing}
+          probeProgress={probeProgress}
+          onReprobe={onReprobe}
+          onPreviewActiveChange={onPreviewActiveChange}
         />
       </div>
 

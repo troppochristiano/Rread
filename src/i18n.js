@@ -41,6 +41,9 @@ export const translations = {
     ariaToggleLang: 'Cambia lingua',
     ariaToggleTheme:'Cambia tema',
     ariaMenuOpen:   'Apri menu',
+    reprobeVoices:  'Testa tutte le voci',
+    probingVoices:  (done, total) => `Test voci ${done}/${total}…`,
+    probingVoicesSimple: 'Test voci…',
   },
   en: {
     subtitle:       'Paste your text and listen',
@@ -84,5 +87,8 @@ export const translations = {
     ariaToggleLang: 'Toggle language',
     ariaToggleTheme:'Toggle theme',
     ariaMenuOpen:   'Open menu',
+    reprobeVoices:  'Test all voices',
+    probingVoices:  (done, total) => `Testing voices ${done}/${total}…`,
+    probingVoicesSimple: 'Testing voices…',
   },
 };
