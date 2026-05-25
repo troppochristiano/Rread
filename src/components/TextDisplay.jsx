@@ -1,4 +1,4 @@
-import { useRef, useEffect, forwardRef, memo, useMemo, useSyncExternalStore } from "react";
+import { useRef, useEffect, useState, forwardRef, memo, useMemo, useSyncExternalStore } from "react";
 
 function tokenize(text) {
   const tokens = [];
@@ -95,22 +95,34 @@ export default function TextDisplay({
   isPlaying,
   rate,
   seekTo,
+  onCenterActive,
+  t,
 }) {
   const containerRef = useRef(null);
   const activeRef = useRef(null);
-  // Set when the user explicitly scrolls (wheel/touch/keys). The auto-scroll
-  // effect resets this on each run, so the loop resumes only on its restart
-  // triggers: play, 3-dots click, or a new batch.
+  // Set when the user explicitly scrolls (wheel/touch/keys). Cleared only on
+  // explicit re-focus triggers (play, 3-dots, Sync button) — sentence/batch
+  // boundary changes no longer reset it, so user scroll is sticky.
   const userScrolledRef = useRef(false);
+  const [userHasScrolled, setUserHasScrolled] = useState(false);
+  // 'in' | 'above' | 'below' — where the active chunk sits relative to the
+  // visible portion of the scroll container. Drives the Sync arrow direction.
+  const [activePosition, setActivePosition] = useState("in");
+  const prevExplicitRef = useRef({ scrollTrigger, scrollBump });
   // Anchors the tracking-scroll curve to the moment the current batch began.
   // Keyed by batch identity so 3-dots / scroll-bump re-runs keep the original
   // start time and resume scrolling from where the curve would be by now.
   const batchAnchorRef = useRef({ key: "", animStart: 0 });
 
+  const showSync = userHasScrolled && activePosition !== "in";
+
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    const onUserScroll = () => { userScrolledRef.current = true; };
+    const onUserScroll = () => {
+      userScrolledRef.current = true;
+      setUserHasScrolled(true);
+    };
     container.addEventListener("wheel", onUserScroll, { passive: true });
     container.addEventListener("touchmove", onUserScroll, { passive: true });
     container.addEventListener("keydown", onUserScroll);
@@ -121,11 +133,48 @@ export default function TextDisplay({
     };
   }, []);
 
+  // Track where the active chunk sits relative to the viewport — re-checks
+  // on scroll and when the active chunk changes. IntersectionObserver isn't
+  // enough here because it only fires on boundary crossings, not direction.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const update = () => {
+      const el = activeRef.current;
+      if (!el) return;
+      const cRect = container.getBoundingClientRect();
+      const eRect = el.getBoundingClientRect();
+      if (eRect.bottom < cRect.top) setActivePosition("above");
+      else if (eRect.top > cRect.bottom) setActivePosition("below");
+      else setActivePosition("in");
+    };
+    update();
+    container.addEventListener("scroll", update, { passive: true });
+    return () => container.removeEventListener("scroll", update);
+  }, [chunkIndex]);
+
+  function handleSync() {
+    // Mirror the 3-dots "go to highlighted" path so the scroll effect's
+    // explicit-refocus branch handles centering + re-engaging tracking.
+    if (onCenterActive) onCenterActive();
+  }
+
   // Auto-scroll: bring active chunk to ~28% from top, then for cloud-voice
   // batches that overflow the viewport, smoothly track through the batch
   // over its estimated duration so the reader can follow along.
   useEffect(() => {
-    userScrolledRef.current = false;
+    const explicitRefocus =
+      scrollTrigger !== prevExplicitRef.current.scrollTrigger ||
+      scrollBump !== prevExplicitRef.current.scrollBump;
+    prevExplicitRef.current = { scrollTrigger, scrollBump };
+
+    if (explicitRefocus) {
+      userScrolledRef.current = false;
+      setUserHasScrolled(false);
+    }
+    // Once the user has scrolled away, sentence/batch changes no longer drag
+    // the view — the Sync button takes over.
+    if (userScrolledRef.current) return;
 
     const container = containerRef.current;
     const el = activeRef.current;
@@ -205,39 +254,58 @@ export default function TextDisplay({
   }
 
   return (
-    <div className="text-display" ref={containerRef}>
-      <div className="text-content" onClick={handleClick}>
-        {chunks.map((chunk, i) => {
-          const isPast = i < chunkIndex;
-          const isCurrent = i === chunkIndex;
-          // Cloud voices (no boundary events) highlight the whole batch
-          // [chunkIndex..batchEndIndex] as a single block.
-          const isInBatch = i > chunkIndex && i <= (batchEndIndex ?? chunkIndex);
-          const plainClassName = isPast ? "chunk-past" : "chunk-future";
+    <div className="text-display-wrap">
+      <div className="text-display" ref={containerRef}>
+        <div className="text-content" onClick={handleClick}>
+          {chunks.map((chunk, i) => {
+            const isPast = i < chunkIndex;
+            const isCurrent = i === chunkIndex;
+            // Cloud voices (no boundary events) highlight the whole batch
+            // [chunkIndex..batchEndIndex] as a single block.
+            const isInBatch = i > chunkIndex && i <= (batchEndIndex ?? chunkIndex);
+            const plainClassName = isPast ? "chunk-past" : "chunk-future";
 
-          return (
-            <div key={i} className="chunk-row">
-              {isCurrent ? (
-                <CurrentChunk
-                  ref={activeRef}
-                  text={chunk}
-                  chunkIndex={i}
-                  subscribeWordIndex={subscribeWordIndex}
-                  getWordIndex={getWordIndex}
-                />
-              ) : isInBatch ? (
-                <BatchChunk text={chunk} chunkIndex={i} />
-              ) : (
-                <PlainChunk
-                  text={chunk}
-                  className={plainClassName}
-                  chunkIndex={i}
-                />
-              )}
-            </div>
-          );
-        })}
+            return (
+              <div key={i} className="chunk-row">
+                {isCurrent ? (
+                  <CurrentChunk
+                    ref={activeRef}
+                    text={chunk}
+                    chunkIndex={i}
+                    subscribeWordIndex={subscribeWordIndex}
+                    getWordIndex={getWordIndex}
+                  />
+                ) : isInBatch ? (
+                  <BatchChunk text={chunk} chunkIndex={i} />
+                ) : (
+                  <PlainChunk
+                    text={chunk}
+                    className={plainClassName}
+                    chunkIndex={i}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
+      {showSync && (
+        <button
+          className="sync-fab"
+          onClick={handleSync}
+          aria-label={t?.sync ?? "Sync"}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M12 5v14"/>
+            {activePosition === "above" ? (
+              <path d="M5 12l7-7 7 7"/>
+            ) : (
+              <path d="M19 12l-7 7-7-7"/>
+            )}
+          </svg>
+          <span>{t?.sync ?? "Sync"}</span>
+        </button>
+      )}
     </div>
   );
 }

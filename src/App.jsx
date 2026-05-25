@@ -8,6 +8,7 @@ import {
 import { useSpeech } from "./hooks/useSpeech";
 import { useMediaSession } from "./hooks/useMediaSession";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { useLibrary } from "./hooks/useLibrary";
 import { cleanTextForSpeech } from "./utils/textCleaner";
 import { splitIntoSentences } from "./utils/textSplitter";
 import { translations } from "./i18n";
@@ -17,6 +18,7 @@ import Player from "./components/Player";
 import VoiceSettings from "./components/VoiceSettings";
 import ResumePrompt from "./components/ResumePrompt";
 import AboutModal from "./components/AboutModal";
+import Library from "./components/Library";
 import "./styles/globals.css";
 
 function IconSun() {
@@ -66,8 +68,18 @@ function IconSliders() {
   );
 }
 
+function IconRefresh() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M10.5 2v3h-3" />
+      <path d="M10.5 5A4.5 4.5 0 1 0 9 9.5" />
+    </svg>
+  );
+}
+
 export default function App() {
-  const { voices, selectedVoice, setSelectedVoice, isProbing, probeProgress, reprobe, setUserPlaying, setPreviewActive } = useVoices();
+  const { voices, selectedVoice, setSelectedVoice, isProbing, probeProgress, reprobe, stopProbe, setUserPlaying, setPreviewActive } = useVoices();
+  const library = useLibrary();
   const [text, setText] = useState(() => getInitialText());
 
   const [theme, setTheme] = useState(() => {
@@ -108,14 +120,19 @@ export default function App() {
   const [scrollBump, setScrollBump] = useState(0);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
 
   const chunks = useMemo(
     () => splitIntoSentences(cleanTextForSpeech(text)),
     [text],
   );
 
-  const { isPlaying, chunkIndex, batchEndIndex, subscribeWordIndex, getWordIndex, scrollTrigger, play, pause, stop, skip, seekTo, speechError, clearSpeechError } =
-    useSpeech({ chunks, selectedVoice, rate, pitch, volume });
+  const {
+    isPlaying, chunkIndex, batchEndIndex, subscribeWordIndex, getWordIndex, scrollTrigger,
+    play, pause, stop, skip, seekTo,
+    speechError, clearSpeechError,
+    wordHighlightSupported, dismissWordHighlightWarning,
+  } = useSpeech({ chunks, selectedVoice, rate, pitch, volume });
 
   // Pause the voice probe while the user is listening so probe utterances
   // don't fight with playback for the speech queue.
@@ -124,6 +141,19 @@ export default function App() {
   }, [isPlaying, setUserPlaying]);
 
   const { clearPosition } = usePersistence({ text, chunkIndex, chunks });
+
+  const [librarySaving, setLibrarySaving] = useState(false);
+
+  // Auto-update the selected library item when text changes.
+  useEffect(() => {
+    if (!library.selectedId) return;
+    setLibrarySaving(true);
+    const timer = setTimeout(() => {
+      library.update(library.selectedId, text);
+      setLibrarySaving(false);
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [text, library.selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // When playback ends naturally (isPlaying→false, chunkIndex resets to 0),
   // clear the saved position so Start begins from the top next time.
@@ -209,10 +239,10 @@ export default function App() {
           rate={rate} setRate={setRate}
           pitch={pitch} setPitch={setPitch}
           volume={volume} setVolume={setVolume}
+          libraryItem={library.items.find(i => i.id === library.selectedId) ?? null}
+          librarySaving={librarySaving}
           onStart={handleStart}
-          isProbing={isProbing}
-          probeProgress={probeProgress}
-          onReprobe={reprobe}
+          onOpenLibrary={() => setLibraryOpen(true)}
           onPreviewActiveChange={setPreviewActive}
           t={t}
         />
@@ -238,6 +268,8 @@ export default function App() {
             isPlaying={isPlaying}
             rate={rate}
             seekTo={seekTo}
+            onCenterActive={() => setScrollBump(n => n + 1)}
+            t={t}
           />
 
           <div className="player-settings">
@@ -258,9 +290,6 @@ export default function App() {
                   rate={rate} setRate={setRate}
                   pitch={pitch} setPitch={setPitch}
                   volume={volume} setVolume={setVolume}
-                  isProbing={isProbing}
-                  probeProgress={probeProgress}
-                  onReprobe={reprobe}
                   onPreviewActiveChange={setPreviewActive}
                   t={t}
                 />
@@ -325,6 +354,27 @@ export default function App() {
         <button className="corner-btn desktop-only" onClick={toggleTheme} title={theme === "dark" ? t.lightMode : t.darkMode} aria-label={theme === "dark" ? t.lightMode : t.darkMode}>
           {theme === "dark" ? <IconSun /> : <IconMoon />}
         </button>
+        <button
+          className={`corner-btn corner-btn-sync desktop-only ${isProbing ? "probing" : ""}`}
+          onClick={isProbing ? stopProbe : reprobe}
+          title={isProbing ? t.stopProbe : t.reprobeVoices}
+          aria-label={isProbing ? t.stopProbe : t.reprobeVoices}
+          style={
+            isProbing && probeProgress.total > 0
+              ? { "--sync-fill": `${(probeProgress.done / probeProgress.total) * 100}%` }
+              : undefined
+          }
+        >
+          {isProbing ? (
+            <span className="sync-progress">
+              {probeProgress.total > 0
+                ? `${probeProgress.done}/${probeProgress.total}`
+                : "…"}
+            </span>
+          ) : (
+            <IconRefresh />
+          )}
+        </button>
         {view === "input" && (
           <button className="corner-btn mobile-only" onClick={() => setMobileMenuOpen(o => !o)} title={t.ariaMenuOpen} aria-label={t.ariaMenuOpen}>
             <IconSliders />
@@ -339,7 +389,28 @@ export default function App() {
         </div>
       )}
 
+      {view === "player" && wordHighlightSupported === false && (
+        <div className="speech-error-banner word-highlight-banner" role="alert">
+          <span>{t.wordHighlightUnsupported}</span>
+          <button onClick={dismissWordHighlightWarning} aria-label="Dismiss">×</button>
+        </div>
+      )}
+
       {aboutOpen && <AboutModal locale={locale} onClose={() => setAboutOpen(false)} />}
+
+      <Library
+        open={libraryOpen}
+        onClose={() => setLibraryOpen(false)}
+        onNew={() => {
+          setText('');
+          const id = library.create('');
+          if (id) library.setSelectedId(id);
+          return id;
+        }}
+        onLoad={(item) => { setText(item.text); library.setSelectedId(item.id); }}
+        library={library}
+        t={t}
+      />
 
       {mobileMenuOpen && (
         <>

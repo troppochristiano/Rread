@@ -4,6 +4,12 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 // expiry the whole utterance batch is highlighted at once (cloud voices)
 // rather than estimating which sentence inside the batch is being spoken.
 const ESTIMATOR_GRACE_MS = 250;
+// Separate, longer threshold for surfacing the "word highlighting unsupported"
+// banner. Mobile engines often emit the first boundary event >250ms after
+// onstart, so the visual fallback fires first but the banner waits for a
+// confident signal — avoids a flash of the banner when boundaries are merely
+// late, not absent.
+const UNSUPPORTED_DETECTION_MS = 1500;
 // If boundary events arrive and then go silent mid-utterance, fall back to
 // whole-batch highlight after this many ms of silence. Long enough that
 // natural pauses between sentences don't briefly flash the whole batch.
@@ -123,6 +129,11 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [scrollTrigger, setScrollTrigger] = useState(0);
   const [speechError, setSpeechError] = useState(null);
+  // null = unknown (haven't detected yet), true = boundary events seen for
+  // this voice, false = grace expired without any boundary (cloud/no-word
+  // voice). Reset whenever the selected voice changes.
+  const [wordHighlightSupported, setWordHighlightSupported] = useState(null);
+  const boundarySeenForVoiceRef = useRef(false);
 
   // wordIndex is not React state — updates go directly to subscribers so only
   // CurrentChunk re-renders on each boundary event, not the entire App tree.
@@ -201,6 +212,7 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
     utterance.volume = r.current.volume;
 
     let graceTimer = null;
+    let unsupportedTimer = null;
     let reArmTimer = null;
     let lastResolvedChunk = -1;
 
@@ -209,6 +221,7 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
 
     const clearTimers = () => {
       if (graceTimer !== null) { clearTimeout(graceTimer); graceTimer = null; }
+      if (unsupportedTimer !== null) { clearTimeout(unsupportedTimer); unsupportedTimer = null; }
       if (reArmTimer !== null) { clearTimeout(reArmTimer); reArmTimer = null; }
     };
 
@@ -255,6 +268,16 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
         expandToBatch();
       }, ESTIMATOR_GRACE_MS);
 
+      // Longer, separate window before surfacing the "unsupported" banner —
+      // on mobile the first boundary often arrives well after the visual
+      // grace, and we don't want the banner to flash for late-but-present
+      // boundary events.
+      unsupportedTimer = setTimeout(() => {
+        unsupportedTimer = null;
+        if (!isActive()) return;
+        if (!boundarySeenForVoiceRef.current) setWordHighlightSupported(false);
+      }, UNSUPPORTED_DETECTION_MS);
+
       if (nextIdx < r.current.chunks.length && r.current.isPlaying) {
         doSpeak(nextIdx, nextCharOffset);
       }
@@ -263,8 +286,13 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
     utterance.onboundary = (e) => {
       if (typeof e.charIndex !== 'number') return;
       if (!isActive()) return;
-      // A real boundary arrived — cancel the grace timer.
+      // A real boundary arrived — cancel grace + unsupported-detection timers.
       if (graceTimer !== null) { clearTimeout(graceTimer); graceTimer = null; }
+      if (unsupportedTimer !== null) { clearTimeout(unsupportedTimer); unsupportedTimer = null; }
+      if (!boundarySeenForVoiceRef.current) {
+        boundarySeenForVoiceRef.current = true;
+        setWordHighlightSupported(true);
+      }
       applyChar(e.charIndex);
       // Watchdog: if boundaries go silent, fall back to whole-batch highlight.
       if (reArmTimer !== null) clearTimeout(reArmTimer);
@@ -319,6 +347,14 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
     }, 300);
     return () => clearTimeout(id);
   }, [rate, pitch, volume, selectedVoice]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Re-detect word-highlight support when the user picks a different voice.
+  const lastVoiceRef = useRef(selectedVoice);
+  if (lastVoiceRef.current !== selectedVoice) {
+    lastVoiceRef.current = selectedVoice;
+    boundarySeenForVoiceRef.current = false;
+    if (wordHighlightSupported !== null) setWordHighlightSupported(null);
+  }
 
   // ─── Public API ─────────────────────────────────────────────────────────────
 
@@ -396,5 +432,11 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
     return () => { silenceAndCancel(); };
   }, []);
 
-  return { isPlaying, chunkIndex, batchEndIndex, subscribeWordIndex, getWordIndex, scrollTrigger, play, pause, stop, skip, seekTo, speechError, clearSpeechError: () => setSpeechError(null) };
+  return {
+    isPlaying, chunkIndex, batchEndIndex, subscribeWordIndex, getWordIndex, scrollTrigger,
+    play, pause, stop, skip, seekTo,
+    speechError, clearSpeechError: () => setSpeechError(null),
+    wordHighlightSupported,
+    dismissWordHighlightWarning: () => setWordHighlightSupported(true),
+  };
 }

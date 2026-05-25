@@ -3,9 +3,11 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 const STORAGE_KEY = 'tts_voice';
 const PROBE_CACHE_KEY = 'tts_voice_probe_v2';
 const PROBE_FULL_FLAG_KEY = 'tts_voice_probe_full_v1';
+const PROBE_FULL_DONE_KEY = 'tts_voice_probe_full_done_v1';
 const PROBE_TIMEOUT_MS = 1500;
 const PROBE_YIELD_MS = 150;
 const PROBE_MAX_RUNTIME_MS = 45_000;
+const PROBE_BATCH_SIZE = 8;
 
 function sortVoices(voices) {
   const lang = navigator.language.split('-')[0].toLowerCase();
@@ -15,6 +17,23 @@ function sortVoices(voices) {
   const otherLocal = voices.filter((v) => !sameLang(v) && v.localService);
   const otherRemote = voices.filter((v) => !sameLang(v) && !v.localService);
   return [...local, ...localRemote, ...otherLocal, ...otherRemote];
+}
+
+// Reorder voices to match the display order in the select: device language
+// first, English second, then all other languages alphabetically by base tag.
+// Within each language group, the original relative order is preserved.
+function displayOrder(voices) {
+  const deviceLang = navigator.language.split('-')[0].toLowerCase();
+  const priority = [deviceLang, 'en'].filter((l, i, a) => a.indexOf(l) === i);
+  const map = new Map();
+  for (const v of voices) {
+    const base = v.lang.split('-')[0].toLowerCase();
+    if (!map.has(base)) map.set(base, []);
+    map.get(base).push(v);
+  }
+  const rest = [...map.keys()].filter((k) => !priority.includes(k)).sort();
+  const ordered = [...priority.filter((k) => map.has(k)), ...rest];
+  return ordered.flatMap((base) => map.get(base));
 }
 
 // Voices the auto-probe targets on load: only the device language plus
@@ -59,6 +78,22 @@ function setFullProbeFlag(on) {
   try {
     if (on) localStorage.setItem(PROBE_FULL_FLAG_KEY, '1');
     else localStorage.removeItem(PROBE_FULL_FLAG_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+function getFullProbeDone() {
+  try {
+    return localStorage.getItem(PROBE_FULL_DONE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function setFullProbeDone() {
+  try {
+    localStorage.setItem(PROBE_FULL_DONE_KEY, '1');
   } catch {
     // ignore
   }
@@ -149,13 +184,23 @@ export function useVoices() {
     function load() {
       const raw = window.speechSynthesis.getVoices();
       if (!raw.length) return;
-      const sorted = sortVoices(raw);
+      // Some mobile engines return the same voice twice from getVoices().
+      const seen = new Set();
+      const unique = raw.filter((v) => {
+        const k = voiceKey(v);
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+      const sorted = sortVoices(unique);
       setAllVoices(sorted);
 
       const cache = loadProbeCache();
       const visible = sorted.filter((v) => cache[voiceKey(v)] !== 'broken');
       const saved = localStorage.getItem(STORAGE_KEY);
-      const match = saved ? visible.find((v) => v.name === saved) : null;
+      const match = saved
+        ? visible.find((v) => voiceKey(v) === saved) || visible.find((v) => v.name === saved)
+        : null;
       setSelectedVoiceState((prev) => prev || match || visible[0] || null);
     }
 
@@ -166,18 +211,35 @@ export function useVoices() {
     };
   }, []);
 
-  const runProbe = useCallback(async (voicesToProbe, { unbounded = false } = {}) => {
+  const runProbe = useCallback(async (voicesToProbe, { unbounded = false, startOffset = 0, totalCount = 0 } = {}) => {
     if (!voicesToProbe.length) return;
     if (cancelRef.current) cancelRef.current.cancelled = true;
     const token = { cancelled: false };
     cancelRef.current = token;
 
+    const displayTotal = totalCount || voicesToProbe.length;
     setIsProbing(true);
-    setProbeProgress({ done: 0, total: voicesToProbe.length });
+    setProbeProgress({ done: startOffset, total: displayTotal });
 
     const cache = loadProbeCache();
     const startedAt = Date.now();
     const sessionResults = [];
+    const pendingBatch = []; // accumulated between flush points
+
+    const flushBatch = (voicesDone) => {
+      if (!pendingBatch.length) return;
+      const snapshot = pendingBatch.splice(0);
+      saveProbeCache(cache);
+      setBrokenSet((prev) => {
+        const next = new Set(prev);
+        for (const { key, result } of snapshot) {
+          if (result === 'broken') next.add(key);
+          else next.delete(key);
+        }
+        return next;
+      });
+      setProbeProgress({ done: startOffset + voicesDone, total: displayTotal });
+    };
 
     try {
       let i = 0;
@@ -190,6 +252,7 @@ export function useVoices() {
         // runtime cap is unbounded during pause so we don't bail just
         // because the user listened or previewed for a long time.
         if (isUserSpeechActive()) {
+          flushBatch(i);
           while (isUserSpeechActive()) {
             await sleep(300);
             if (token.cancelled) return;
@@ -221,23 +284,19 @@ export function useVoices() {
 
         sessionResults.push({ key: voiceKey(v), result, ms });
         cache[voiceKey(v)] = result;
-        saveProbeCache(cache);
-
-        setBrokenSet((prev) => {
-          const next = new Set(prev);
-          if (result === 'broken') next.add(voiceKey(v));
-          else next.delete(voiceKey(v));
-          return next;
-        });
-        setProbeProgress({ done: i + 1, total: voicesToProbe.length });
+        pendingBatch.push({ key: voiceKey(v), result });
         i++;
+
+        if (i % PROBE_BATCH_SIZE === 0) flushBatch(i);
       }
+      flushBatch(i);
 
       // Reached the end of the batch cleanly — if this was a full reprobe,
       // clear the persisted "in progress" flag so future loads use the
       // normal auto-probe behaviour.
       if (unbounded && !token.cancelled && i === voicesToProbe.length) {
         setFullProbeFlag(false);
+        setFullProbeDone();
       }
 
       // Safety net: only roll back when the browser clearly blocked synthesis
@@ -266,24 +325,25 @@ export function useVoices() {
     }
   }, []);
 
-  // Auto-probe any new (uncached) voices on load. Default scope is the
-  // device language + English; engines like Edge expose hundreds of cloud
-  // voices and probing them all on every load would be impractical. If a
-  // previous full reprobe was interrupted (e.g. by a reload), the persisted
-  // flag tells us to resume probing every uncached voice instead.
+  // Auto-probe on load. If a full probe was never completed (first run) or
+  // was interrupted mid-way, probe every voice with the unbounded cap.
+  // Otherwise only probe newly added uncached voices in device-lang + English.
   useEffect(() => {
     if (!allVoices.length) return;
+    if (/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) return;
     const cache = loadProbeCache();
     const resumeFull = getFullProbeFlag();
-    const candidates = resumeFull
-      ? allVoices
-      : pickAutoProbeVoices(allVoices);
+    const neverDone = !getFullProbeDone();
+    const fullRun = resumeFull || neverDone;
+    const candidates = fullRun ? displayOrder(allVoices) : pickAutoProbeVoices(allVoices);
     const todo = candidates.filter((v) => !(voiceKey(v) in cache));
     if (!todo.length) {
-      if (resumeFull) setFullProbeFlag(false);
+      if (fullRun) { setFullProbeFlag(false); setFullProbeDone(); }
       return;
     }
-    runProbe(todo, { unbounded: resumeFull });
+    if (neverDone && !resumeFull) setFullProbeFlag(true);
+    const alreadyDone = candidates.length - todo.length;
+    runProbe(todo, { unbounded: true, startOffset: alreadyDone, totalCount: candidates.length });
   }, [allVoices, runProbe]);
 
   const reprobe = useCallback(() => {
@@ -297,8 +357,15 @@ export function useVoices() {
     setFullProbeFlag(true);
     setBrokenSet(new Set());
     // User-initiated: probe every voice and skip the runtime cap.
-    runProbe(allVoices, { unbounded: true });
+    runProbe(displayOrder(allVoices), { unbounded: true });
   }, [allVoices, runProbe]);
+
+  const stopProbe = useCallback(() => {
+    if (cancelRef.current) cancelRef.current.cancelled = true;
+    setFullProbeFlag(false);
+    setIsProbing(false);
+    setProbeProgress({ done: 0, total: 0 });
+  }, []);
 
   const voices = allVoices.filter((v) => !brokenSet.has(voiceKey(v)));
 
@@ -310,7 +377,7 @@ export function useVoices() {
 
   const setSelectedVoice = useCallback((voice) => {
     setSelectedVoiceState(voice);
-    if (voice) localStorage.setItem(STORAGE_KEY, voice.name);
+    if (voice) localStorage.setItem(STORAGE_KEY, voiceKey(voice));
   }, []);
 
   return {
@@ -320,6 +387,7 @@ export function useVoices() {
     isProbing,
     probeProgress,
     reprobe,
+    stopProbe,
     setUserPlaying,
     setPreviewActive,
   };

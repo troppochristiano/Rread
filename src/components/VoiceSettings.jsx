@@ -1,39 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-
-const LANG_NAMES = new Intl.DisplayNames([navigator.language, "en"], {
-  type: "language",
-});
-
-function getLangLabel(langTag) {
-  try {
-    return LANG_NAMES.of(langTag);
-  } catch {
-    return langTag;
-  }
-}
-
-function groupVoicesByLang(voices) {
-  const deviceLang = navigator.language.split("-")[0].toLowerCase();
-  const map = new Map();
-
-  for (const v of voices) {
-    const base = v.lang.split("-")[0].toLowerCase();
-    if (!map.has(base)) map.set(base, []);
-    map.get(base).push(v);
-  }
-
-  // Order: device lang first, English second (if not device), rest alphabetically
-  const keys = [...map.keys()];
-  const priority = [deviceLang, "en"].filter((l, i, a) => a.indexOf(l) === i);
-  const rest = keys.filter((k) => !priority.includes(k)).sort();
-  const ordered = [...priority.filter((k) => map.has(k)), ...rest];
-
-  return ordered.map((base) => ({
-    base,
-    label: getLangLabel(base),
-    voices: map.get(base),
-  }));
-}
+import VoiceSelect from "./VoiceSelect";
 
 const PREVIEW_FALLBACK = {
   it: "Ciao, questa è un'anteprima della voce.",
@@ -71,24 +37,22 @@ function IconStop() {
   );
 }
 
-function IconRefresh() {
-  return (
-    <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M10.5 2v3h-3" />
-      <path d="M10.5 5A4.5 4.5 0 1 0 9 9.5" />
-    </svg>
-  );
-}
-
 export default function VoiceSettings({
-  voices, selectedVoice, setSelectedVoice,
-  rate, setRate, pitch, setPitch, volume, setVolume, t,
-  allowPreview = false, previewText = "",
+  voices,
+  selectedVoice,
+  setSelectedVoice,
+  rate,
+  setRate,
+  pitch,
+  setPitch,
+  volume,
+  setVolume,
+  t,
+  allowPreview = false,
+  previewText = "",
   slidersCollapsible = false,
-  isProbing = false, probeProgress = { done: 0, total: 0 }, onReprobe,
   onPreviewActiveChange,
 }) {
-  const groups = groupVoicesByLang(voices);
   const [isPreviewing, setIsPreviewing] = useState(false);
   const [slidersOpen, setSlidersOpen] = useState(false);
   const activeRef = useRef(false);
@@ -168,26 +132,12 @@ export default function VoiceSettings({
           <span>{t.voice}</span>
         </label>
         <div className="voice-select-row">
-          <select
-            className="voice-select"
-            aria-label={t.voice}
-            value={selectedVoice?.name || ""}
-            onChange={(e) =>
-              setSelectedVoice(
-                voices.find((v) => v.name === e.target.value) || null,
-              )
-            }
-          >
-            {groups.map(({ base, label, voices: groupVoices }) => (
-              <optgroup key={base} label={label}>
-                {groupVoices.map((v) => (
-                  <option key={v.name} value={v.name}>
-                    {v.name} ({v.lang})
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
+          <VoiceSelect
+            voices={voices}
+            selectedVoice={selectedVoice}
+            setSelectedVoice={setSelectedVoice}
+            t={t}
+          />
           {allowPreview && (
             <button
               type="button"
@@ -210,7 +160,15 @@ export default function VoiceSettings({
           onClick={() => setSlidersOpen((o) => !o)}
         >
           <span>{t.slidersLabel}</span>
-          <svg width="10" height="7" viewBox="0 0 12 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+          <svg
+            width="10"
+            height="7"
+            viewBox="0 0 12 8"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+          >
             <path d="M1 1l5 5 5-5" />
           </svg>
         </button>
@@ -218,31 +176,6 @@ export default function VoiceSettings({
 
       {(!slidersCollapsible || slidersOpen) && (
         <div className="sliders">
-          {onReprobe && (
-            <div className="slider-row reprobe-row">
-              <button
-                type="button"
-                className={`voice-reprobe-btn ${isProbing ? "probing" : ""}`}
-                onClick={onReprobe}
-                disabled={isProbing}
-                title={t.reprobeVoices}
-                aria-label={t.reprobeVoices}
-              >
-                <IconRefresh />
-                <span>{t.reprobeVoices}</span>
-              </button>
-              {isProbing && (
-                <div className="voice-probe-status" role="status" aria-live="polite">
-                  <span>
-                    {probeProgress.total > 0
-                      ? t.probingVoices(probeProgress.done, probeProgress.total)
-                      : t.probingVoicesSimple}
-                  </span>
-                </div>
-              )}
-            </div>
-          )}
-
           <div className="slider-row">
             <label className="slider-label">
               <span>{t.speed}</span>
@@ -293,8 +226,10 @@ export default function VoiceSettings({
               onChange={(e) => setVolume(parseFloat(e.target.value))}
             />
           </div>
+
         </div>
       )}
+
     </div>
   );
 }
