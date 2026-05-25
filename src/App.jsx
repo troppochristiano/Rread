@@ -7,6 +7,7 @@ import {
 } from "./hooks/usePersistence";
 import { useSpeech } from "./hooks/useSpeech";
 import { useMediaSession } from "./hooks/useMediaSession";
+import { useSilentAudio } from "./hooks/useSilentAudio";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useLibrary } from "./hooks/useLibrary";
 import { cleanTextForSpeech } from "./utils/textCleaner";
@@ -174,6 +175,7 @@ export default function App() {
 
   function handleStart() {
     if (!text.trim()) return;
+    unlockSilentAudio();
     const saved = getSavedPositionForText(text);
     if (saved && saved.index > 0) {
       setResumePosition(saved);
@@ -186,6 +188,7 @@ export default function App() {
   }
 
   function handleRestart() {
+    unlockSilentAudio();
     setUserPlaying(true);
     setResumePosition(null);
     clearPosition();
@@ -195,6 +198,7 @@ export default function App() {
   }
 
   function handleResume(pos) {
+    unlockSilentAudio();
     setUserPlaying(true);
     setResumePosition(null);
     seekTo(pos.index);
@@ -228,6 +232,8 @@ export default function App() {
     onStop: handleStop,
     onSkip: skip,
   });
+
+  const { unlock: unlockSilentAudio } = useSilentAudio(isPlaying);
 
   return (
     <div className="app">
