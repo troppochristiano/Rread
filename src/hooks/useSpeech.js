@@ -432,6 +432,61 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
     return () => { silenceAndCancel(); };
   }, []);
 
+  // On iOS/mobile Safari the screen lock throttles JS for the hidden tab:
+  // the silent-audio session keeps the speech engine running, but
+  // `onboundary` callbacks get dropped, so wordIndex and chunkIndex (and
+  // the persisted resume position) freeze at lock time even though audio
+  // continued playing. On return-to-visible, cancel the in-flight utterance
+  // and re-speak from the last known position to get the highlight and
+  // saved position back in sync. A small threshold skips brief tab
+  // switches where boundary events are still flowing.
+  useEffect(() => {
+    let hiddenAt = null;
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        hiddenAt = Date.now();
+        return;
+      }
+      const hiddenMs = hiddenAt ? Date.now() - hiddenAt : 0;
+      hiddenAt = null;
+      if (hiddenMs < 1500) return;
+      if (!r.current.isPlaying) return;
+      const { chunkIndex: ci, lastCharIndex } = r.current;
+      silenceAndCancel();
+      doSpeak(ci, lastCharIndex);
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Watchdog: the onstart→doSpeak prefetch chain depends on JS callbacks
+  // firing in a timely way. When the screen locks (or the tab backgrounds),
+  // mobile browsers throttle timers/callbacks and the chain can stall,
+  // leaving the engine queue empty while isPlaying is still true — audible
+  // result: playback stops mid-text after the phone has been locked for a
+  // while. This polls for a drained queue and re-kicks from the last known
+  // position. Two consecutive drained ticks before kicking avoids racing the
+  // natural between-utterance gap.
+  useEffect(() => {
+    if (!isPlaying) return;
+    let drainedTicks = 0;
+    const id = setInterval(() => {
+      if (!r.current.isPlaying) return;
+      const ss = window.speechSynthesis;
+      if (ss.speaking || ss.pending) {
+        drainedTicks = 0;
+        return;
+      }
+      drainedTicks++;
+      if (drainedTicks < 2) return;
+      drainedTicks = 0;
+      const { chunkIndex: ci, lastCharIndex } = r.current;
+      silenceAndCancel();
+      doSpeak(ci, lastCharIndex);
+    }, 2000);
+    return () => clearInterval(id);
+  }, [isPlaying]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return {
     isPlaying, chunkIndex, batchEndIndex, subscribeWordIndex, getWordIndex, scrollTrigger,
     play, pause, stop, skip, seekTo,
