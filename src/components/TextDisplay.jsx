@@ -250,6 +250,7 @@ export default function TextDisplay({
     const off = Number(target.dataset.offset);
     if (Number.isFinite(ci) && Number.isFinite(off)) {
       seekTo(ci, off);
+      if (onCenterActive) onCenterActive();
     }
   }
 

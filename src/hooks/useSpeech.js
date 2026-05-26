@@ -134,6 +134,11 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
   // voice). Reset whenever the selected voice changes.
   const [wordHighlightSupported, setWordHighlightSupported] = useState(null);
   const boundarySeenForVoiceRef = useRef(false);
+  // Wall-clock timestamp of the last boundary event from any utterance. Used
+  // by the boundary-silence watchdog to detect when JS callbacks got
+  // throttled (typically by an iOS screen lock with active audio session)
+  // and the highlight/position has frozen even though audio kept going.
+  const lastBoundaryTsRef = useRef(0);
 
   // wordIndex is not React state — updates go directly to subscribers so only
   // CurrentChunk re-renders on each boundary event, not the entire App tree.
@@ -252,6 +257,7 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
 
       r.current.activeGen = gen;
       r.current.utterance = utterance;
+      lastBoundaryTsRef.current = Date.now();
 
       // Snap to first chunk of the batch immediately on audio start.
       const { chunkIdx } = resolveBoundary(0, boundaries);
@@ -286,6 +292,7 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
     utterance.onboundary = (e) => {
       if (typeof e.charIndex !== 'number') return;
       if (!isActive()) return;
+      lastBoundaryTsRef.current = Date.now();
       // A real boundary arrived — cancel grace + unsupported-detection timers.
       if (graceTimer !== null) { clearTimeout(graceTimer); graceTimer = null; }
       if (unsupportedTimer !== null) { clearTimeout(unsupportedTimer); unsupportedTimer = null; }
@@ -473,6 +480,20 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
     const id = setInterval(() => {
       if (!r.current.isPlaying) return;
       const ss = window.speechSynthesis;
+      // Boundary-silence re-kick: covers the iOS screen-lock case where the
+      // audio session stayed alive but boundary callbacks were throttled, so
+      // the engine is still speaking but our highlight/position froze. Only
+      // act if we've already confirmed this voice emits boundary events,
+      // otherwise we'd thrash on cloud voices that legitimately never emit.
+      if (ss.speaking && boundarySeenForVoiceRef.current
+          && lastBoundaryTsRef.current
+          && Date.now() - lastBoundaryTsRef.current > 6000) {
+        drainedTicks = 0;
+        const { chunkIndex: ci, lastCharIndex } = r.current;
+        silenceAndCancel();
+        doSpeak(ci, lastCharIndex);
+        return;
+      }
       if (ss.speaking || ss.pending) {
         drainedTicks = 0;
         return;
