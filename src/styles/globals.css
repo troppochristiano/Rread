@@ -150,7 +150,7 @@ select option, select optgroup {
   background: var(--paper);
 }
 .text-area::placeholder {
-  color: var(--ink-ghost);
+  color: var(--ink-faded);
   font-style: italic;
 }
 
@@ -425,8 +425,71 @@ select option, select optgroup {
   overflow-y: auto;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
 }
+.voice-search {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--paper);
+  border-bottom: 1px solid var(--ink-ghost);
+  color: var(--ink-faded);
+}
+.voice-search-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-family: var(--font-mono);
+  padding: 2px 0;
+}
+.voice-search-input:focus {
+  outline: none;
+}
+.voice-search-input::placeholder {
+  color: var(--ink-faded);
+}
 .voice-group + .voice-group {
   border-top: 1px dashed var(--ink-ghost);
+}
+.voice-group--suggested {
+  background: var(--ink-ghost);
+}
+.voice-group-label--suggested {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  color: var(--ink);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+.voice-group-label--suggested .voice-suggested-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.voice-group-label--suggested svg:last-child {
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+.voice-group-label--suggested.open svg:last-child {
+  transform: rotate(180deg);
+}
+.voice-no-results {
+  padding: 16px 12px;
+  text-align: center;
+  color: var(--ink-faded);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
 }
 .voice-group-label {
   text-transform: uppercase;
@@ -440,6 +503,9 @@ select option, select optgroup {
 .voice-option {
   align-items: stretch;
   display: flex;
+}
+.voice-option {
+  transition: background 0.15s ease;
 }
 .voice-option-label {
   text-align: left;
@@ -455,9 +521,22 @@ select option, select optgroup {
   flex: 1;
   padding: 8px 12px;
   overflow: hidden;
+  transition: transform 0.15s ease, padding-left 0.15s ease;
 }
 .voice-option:not(.selected):hover {
   background: var(--ink-ghost);
+}
+.voice-option:not(.selected):hover .voice-option-label {
+  padding-left: 18px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .voice-option,
+  .voice-option-label {
+    transition: none;
+  }
+  .voice-option:not(.selected):hover .voice-option-label {
+    padding-left: 12px;
+  }
 }
 .voice-option.selected {
   background: var(--ink);

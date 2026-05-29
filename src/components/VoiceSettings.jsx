@@ -50,6 +50,7 @@ export default function VoiceSettings({
   t,
   allowPreview = false,
   previewText = "",
+  text = "",
   slidersCollapsible = false,
   onPreviewActiveChange,
 }) {
@@ -136,6 +137,7 @@ export default function VoiceSettings({
             voices={voices}
             selectedVoice={selectedVoice}
             setSelectedVoice={setSelectedVoice}
+            text={text || previewText}
             t={t}
           />
           {allowPreview && (

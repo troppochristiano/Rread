@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { detectLanguage } from "../utils/detectLanguage";
 
 const LANG_NAMES = new Intl.DisplayNames([navigator.language, "en"], {
   type: "language",
@@ -86,14 +87,78 @@ function IconChevron() {
   );
 }
 
-export default function VoiceSelect({ voices, selectedVoice, setSelectedVoice, t }) {
+function IconSearch() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 14 14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+    >
+      <circle cx="6" cy="6" r="4.2" />
+      <path d="M9.2 9.2L12.5 12.5" />
+    </svg>
+  );
+}
+
+function IconSparkle() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+      <path d="M6 0l1.1 3.3L10.5 4.5 7.1 5.6 6 9 4.9 5.6 1.5 4.5l3.4-1.2L6 0zM10.5 7.5l.5 1.5 1.5.5-1.5.5-.5 1.5-.5-1.5-1.5-.5 1.5-.5.5-1.5z" />
+    </svg>
+  );
+}
+
+function matchesQuery(v, label, q) {
+  return (
+    label.toLowerCase().includes(q) ||
+    v.name.toLowerCase().includes(q) ||
+    v.lang.toLowerCase().includes(q)
+  );
+}
+
+export default function VoiceSelect({ voices, selectedVoice, setSelectedVoice, text = "", t }) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [suggestedOpen, setSuggestedOpen] = useState(true);
   const [favorites, setFavorites] = useState(loadFavorites);
   const rootRef = useRef(null);
   const dropdownRef = useRef(null);
+  const searchRef = useRef(null);
 
-  const favoriteVoices = voices.filter((v) => favorites.has(voiceKey(v)));
-  const groups = groupVoicesByLang(voices);
+  const allGroups = useMemo(() => groupVoicesByLang(voices), [voices]);
+
+  // Smart suggestion: detect the text language and surface matching voices.
+  const suggestedBase = useMemo(() => detectLanguage(text), [text]);
+  const suggestedGroup = suggestedBase
+    ? allGroups.find((g) => g.base === suggestedBase) || null
+    : null;
+
+  const q = query.trim().toLowerCase();
+  const groups = q
+    ? allGroups
+        .map((g) => ({
+          ...g,
+          voices: g.voices.filter((v) => matchesQuery(v, g.label, q)),
+        }))
+        .filter((g) => g.voices.length > 0)
+    : allGroups;
+
+  const favoriteVoices = voices.filter(
+    (v) =>
+      favorites.has(voiceKey(v)) &&
+      (!q || matchesQuery(v, getLangLabel(v.lang.split("-")[0]), q)),
+  );
+
+  const hasResults = groups.length > 0 || favoriteVoices.length > 0;
+
+  const closeDropdown = useCallback(() => {
+    setOpen(false);
+    setQuery("");
+  }, []);
 
   const toggleFavorite = useCallback((v) => {
     const key = voiceKey(v);
@@ -109,10 +174,10 @@ export default function VoiceSelect({ voices, selectedVoice, setSelectedVoice, t
   useEffect(() => {
     if (!open) return;
     function onPointerDown(e) {
-      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false);
+      if (rootRef.current && !rootRef.current.contains(e.target)) closeDropdown();
     }
     function onKey(e) {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") closeDropdown();
     }
     document.addEventListener("mousedown", onPointerDown);
     document.addEventListener("touchstart", onPointerDown);
@@ -122,12 +187,11 @@ export default function VoiceSelect({ voices, selectedVoice, setSelectedVoice, t
       document.removeEventListener("touchstart", onPointerDown);
       document.removeEventListener("keydown", onKey);
     };
-  }, [open]);
+  }, [open, closeDropdown]);
 
   useEffect(() => {
     if (!open || !dropdownRef.current) return;
-    const el = dropdownRef.current.querySelector(".voice-option.selected");
-    if (el) el.scrollIntoView({ block: "nearest" });
+    dropdownRef.current.scrollTop = 0;
   }, [open]);
 
   const selectedKey = selectedVoice ? voiceKey(selectedVoice) : "";
@@ -137,7 +201,7 @@ export default function VoiceSelect({ voices, selectedVoice, setSelectedVoice, t
 
   function selectVoice(v) {
     setSelectedVoice(v);
-    setOpen(false);
+    closeDropdown();
   }
 
   function renderOption(v, keyPrefix) {
@@ -190,6 +254,39 @@ export default function VoiceSelect({ voices, selectedVoice, setSelectedVoice, t
       </button>
       {open && (
         <div className="voice-dropdown" ref={dropdownRef} role="listbox">
+          <div className="voice-search">
+            <IconSearch />
+            <input
+              ref={searchRef}
+              type="text"
+              className="voice-search-input"
+              placeholder={t.searchLang}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              autoFocus
+              aria-label={t.searchLang}
+            />
+          </div>
+
+          {!q && suggestedGroup && (
+            <div className="voice-group voice-group--suggested">
+              <button
+                type="button"
+                className={`voice-group-label voice-group-label--suggested ${suggestedOpen ? "open" : ""}`}
+                onClick={() => setSuggestedOpen((o) => !o)}
+                aria-expanded={suggestedOpen}
+              >
+                <IconSparkle />
+                <span className="voice-suggested-text">
+                  {t.suggestedLang(suggestedGroup.label)}
+                </span>
+                <IconChevron />
+              </button>
+              {suggestedOpen &&
+                suggestedGroup.voices.map((v) => renderOption(v, "sug-"))}
+            </div>
+          )}
+
           {favoriteVoices.length > 0 && (
             <div className="voice-group">
               <div className="voice-group-label">{t.favorites}</div>
@@ -202,6 +299,8 @@ export default function VoiceSelect({ voices, selectedVoice, setSelectedVoice, t
               {groupVoices.map((v) => renderOption(v, ""))}
             </div>
           ))}
+
+          {!hasResults && <div className="voice-no-results">{t.noVoiceResults}</div>}
         </div>
       )}
     </div>

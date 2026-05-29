@@ -324,6 +324,7 @@ export default function App() {
                   rate={rate} setRate={setRate}
                   pitch={pitch} setPitch={setPitch}
                   volume={volume} setVolume={setVolume}
+                  text={text}
                   onPreviewActiveChange={setPreviewActive}
                   t={t}
                 />

@@ -24,7 +24,7 @@ export default function TextInput({
     <div className="input-view">
       <header className="app-header">
         <h1 className="app-title">RRead.</h1>
-        <p className="app-sub">{t.subtitle}</p>
+        {/* <p className="app-sub">{t.subtitle}</p>*/}
       </header>
 
       <div className="input-settings">
@@ -40,7 +40,7 @@ export default function TextInput({
           setVolume={setVolume}
           t={t}
           allowPreview
-          // previewText={text}
+          text={text}
           slidersCollapsible
           onPreviewActiveChange={onPreviewActiveChange}
         />
@@ -49,8 +49,14 @@ export default function TextInput({
       <div className="textarea-wrap">
         {libraryItem && (
           <div className="library-context">
-            <span className="library-context-title">{libraryItem.title || t.libraryUntitled}</span>
-            {librarySaving && <span className="library-context-saving">{t.libraryContextSaving}</span>}
+            <span className="library-context-title">
+              {libraryItem.title || t.libraryUntitled}
+            </span>
+            {librarySaving && (
+              <span className="library-context-saving">
+                {t.libraryContextSaving}
+              </span>
+            )}
           </div>
         )}
         <textarea
@@ -63,7 +69,7 @@ export default function TextInput({
         <div className="textarea-toolbar">
           <button
             type="button"
-            className={`import-btn${libraryPulse ? ' import-btn--pulse' : ''}`}
+            className={`import-btn${libraryPulse ? " import-btn--pulse" : ""}`}
             onClick={onOpenLibrary}
             title={t.libraryOpen}
           >
@@ -72,11 +78,7 @@ export default function TextInput({
         </div>
       </div>
 
-      <button
-        className="start-btn"
-        onClick={onStart}
-        disabled={!text.trim()}
-      >
+      <button className="start-btn" onClick={onStart} disabled={!text.trim()}>
         {t.startBtn}
       </button>
     </div>
