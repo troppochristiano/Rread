@@ -1436,7 +1436,6 @@ select option, select optgroup {
   background: var(--paper);
   border-left: 1px solid var(--ink);
   width: min(420px, 100vw);
-  box-shadow: -6px 0 0 0 var(--ink);
   z-index: 200;
   pointer-events: none;
   flex-direction: column;
@@ -1577,8 +1576,6 @@ select option, select optgroup {
 }
 .library-item--selected {
   background: var(--paper-warm);
-  border-left: 2px solid var(--ink);
-  padding-left: 20px;
 }
 [data-theme="dark"] .library-item--selected {
   background: #2e2924;

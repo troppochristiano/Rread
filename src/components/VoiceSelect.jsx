@@ -28,9 +28,20 @@ function saveFavorites(set) {
   }
 }
 
+// Android reports locale tags with underscores (Java Locale.toString(), e.g.
+// "en_US", "it_IT"); desktop and iOS use BCP-47 hyphens ("en-US"). Normalize
+// so grouping by base language and Intl.DisplayNames labels work everywhere.
+function normalizeLang(lang) {
+  return lang.replace(/_/g, "-");
+}
+
+function baseLang(lang) {
+  return normalizeLang(lang).split("-")[0].toLowerCase();
+}
+
 function getLangLabel(tag) {
   try {
-    return LANG_NAMES.of(tag);
+    return LANG_NAMES.of(normalizeLang(tag));
   } catch {
     return tag;
   }
@@ -40,7 +51,7 @@ function groupVoicesByLang(voices) {
   const deviceLang = navigator.language.split("-")[0].toLowerCase();
   const map = new Map();
   for (const v of voices) {
-    const base = v.lang.split("-")[0].toLowerCase();
+    const base = baseLang(v.lang);
     if (!map.has(base)) map.set(base, []);
     map.get(base).push(v);
   }
@@ -116,7 +127,7 @@ function matchesQuery(v, label, q) {
   return (
     label.toLowerCase().includes(q) ||
     v.name.toLowerCase().includes(q) ||
-    v.lang.toLowerCase().includes(q)
+    normalizeLang(v.lang).toLowerCase().includes(q)
   );
 }
 
@@ -150,7 +161,7 @@ export default function VoiceSelect({ voices, selectedVoice, setSelectedVoice, t
   const favoriteVoices = voices.filter(
     (v) =>
       favorites.has(voiceKey(v)) &&
-      (!q || matchesQuery(v, getLangLabel(v.lang.split("-")[0]), q)),
+      (!q || matchesQuery(v, getLangLabel(baseLang(v.lang)), q)),
   );
 
   const hasResults = groups.length > 0 || favoriteVoices.length > 0;
@@ -194,9 +205,18 @@ export default function VoiceSelect({ voices, selectedVoice, setSelectedVoice, t
     dropdownRef.current.scrollTop = 0;
   }, [open]);
 
+  // Focus the search input on open, but not on touch devices: focusing there
+  // pops up the on-screen keyboard, which covers the language list.
+  useEffect(() => {
+    if (!open || !searchRef.current) return;
+    const isTouch = window.matchMedia?.("(pointer: coarse)").matches;
+    if (isTouch) return;
+    searchRef.current.focus();
+  }, [open]);
+
   const selectedKey = selectedVoice ? voiceKey(selectedVoice) : "";
   const triggerLabel = selectedVoice
-    ? `${selectedVoice.name} (${selectedVoice.lang})`
+    ? `${selectedVoice.name} (${normalizeLang(selectedVoice.lang)})`
     : t.voice;
 
   function selectVoice(v) {
@@ -220,7 +240,7 @@ export default function VoiceSelect({ voices, selectedVoice, setSelectedVoice, t
           className="voice-option-label"
           onClick={() => selectVoice(v)}
         >
-          {v.name} ({v.lang})
+          {v.name} ({normalizeLang(v.lang)})
         </button>
         <button
           type="button"
@@ -263,7 +283,6 @@ export default function VoiceSelect({ voices, selectedVoice, setSelectedVoice, t
               placeholder={t.searchLang}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              autoFocus
               aria-label={t.searchLang}
             />
           </div>
