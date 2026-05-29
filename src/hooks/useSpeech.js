@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { MAX_UTTERANCE_CHARS, findUtteranceBreak } from '../utils/utteranceBatch.js';
 
 // Grace period before deciding a voice doesn't emit boundary events. On
 // expiry the whole utterance batch is highlighted at once (cloud voices)
@@ -14,39 +15,6 @@ const UNSUPPORTED_DETECTION_MS = 1500;
 // whole-batch highlight after this many ms of silence. Long enough that
 // natural pauses between sentences don't briefly flash the whole batch.
 const BOUNDARY_SILENCE_MS = 3000;
-
-// Chunks (paragraph-sized — the unit of display/seek/highlight) get batched
-// into larger utterances at speak-time. Each utterance carries an end-of-
-// utterance silence the engine inserts on its own (~150-300ms), which is the
-// audible "gap" between chunks. Batching collapses N gaps into 1. 1500 is
-// comfortable for all engines tested without losing `onboundary` accuracy.
-// Paragraphs longer than this are split internally at sentence boundaries
-// while remaining a single display chunk.
-const MAX_UTTERANCE_CHARS = 1500;
-
-// Find a natural break point ≤ maxLen for splitting an oversized paragraph
-// across utterances. Prefers sentence boundaries, then weaker pauses, then
-// whitespace. Falls back to a hard cut at maxLen if nothing else fits.
-function findUtteranceBreak(text, maxLen) {
-  for (const re of [
-    /[.!?…]["']?\s+/g,
-    /[;—]\s+/g,
-    /[:]\s+/g,
-    /,\s+/g,
-    /\s+/g,
-  ]) {
-    re.lastIndex = 0;
-    let lastEnd = -1;
-    let m;
-    while ((m = re.exec(text)) !== null) {
-      const end = m.index + m[0].length;
-      if (end > maxLen) break;
-      lastEnd = end;
-    }
-    if (lastEnd > 0) return lastEnd;
-  }
-  return maxLen;
-}
 
 // Pack chunks[startIdx..] (starting from `startCharOffset` within the first
 // chunk) into one utterance up to MAX_UTTERANCE_CHARS. Returns the joined
@@ -99,6 +67,58 @@ function buildBatch(allChunks, startIdx, startCharOffset) {
   }
 
   return { text, boundaries, nextIdx: i, nextCharOffset: 0 };
+}
+
+// Advance a char offset past the word it lands on, then past trailing
+// whitespace, so the returned offset points at the START of the NEXT word.
+// Used on resume after a stall to avoid re-speaking the word the highlight
+// was frozen on (the engine almost certainly already played it).
+function advancePastWord(text, off) {
+  let i = Math.max(0, Math.min(off, text.length));
+  while (i < text.length && !/\s/.test(text[i])) i++;
+  while (i < text.length && /\s/.test(text[i])) i++;
+  return i;
+}
+
+// The visibility-change re-fire and the drained-queue watchdog exist to
+// compensate for mobile-only quirks (iOS screen-lock callback throttling, the
+// onstart→doSpeak prefetch chain stalling under aggressive timer throttling).
+// Desktop engines don't exhibit those failure modes, and re-firing there
+// would cause unwanted utterance restarts on tab switches and false-positive
+// re-kicks during normal inter-utterance pauses. Gate both effects on this.
+const IS_MOBILE = typeof navigator !== 'undefined'
+  && /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+// Rough characters-per-second the engine speaks at rate=1.0. Used to
+// estimate how far audio progressed past `lastCharIndex` during periods
+// when boundary callbacks were throttled (typically iOS screen lock).
+// English TTS at default rate is ~150 wpm × ~5 chars/word ≈ 12-14 ch/s;
+// 12 keeps the estimate slightly conservative so we lean toward replaying
+// a word over skipping content.
+const ESTIMATED_CHARS_PER_SEC_RATE_1 = 12;
+
+// Walk an `advance` count of chars forward from (idx, off), crossing chunk
+// boundaries (each inter-chunk space counts as one char to match how
+// buildBatch joins chunks with a single space). Returns the resulting
+// {idx, off}, clamped to the end of the last chunk.
+function advanceCharsAcrossChunks(chunks, idx, off, advance) {
+  let curIdx = idx;
+  let curOff = off;
+  while (curIdx < chunks.length && advance > 0) {
+    const remaining = chunks[curIdx].length - curOff;
+    if (advance <= remaining) {
+      curOff += advance;
+      return { idx: curIdx, off: curOff };
+    }
+    advance -= remaining + 1; // +1 for the joining space between chunks
+    curIdx++;
+    curOff = 0;
+  }
+  if (curIdx >= chunks.length) {
+    const last = Math.max(0, chunks.length - 1);
+    return { idx: last, off: chunks[last]?.length ?? 0 };
+  }
+  return { idx: curIdx, off: curOff };
 }
 
 // Resolve a char position within the utterance to {chunkIdx, localChar}, where
@@ -192,6 +212,29 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
     }
   }
 
+  // Estimate where audio actually is now, given the last confirmed boundary
+  // and the wall-clock time elapsed since. When boundary events were flowing
+  // up to `now`, this returns approximately (chunkIndex, lastCharIndex). When
+  // they've been silent (phone lock throttling), the engine kept speaking,
+  // so the returned position projects ESTIMATED_CHARS_PER_SEC × rate × elapsed
+  // chars forward — close to where audio truly ended up. Snaps forward to the
+  // next word start so we never restart mid-word.
+  function estimateResumePosition() {
+    const { chunkIndex: ci, lastCharIndex } = r.current;
+    const chunks = r.current.chunks;
+    const lastTs = lastBoundaryTsRef.current;
+    if (!lastTs || !boundarySeenForVoiceRef.current) {
+      return { idx: ci, off: lastCharIndex };
+    }
+    const elapsedSec = Math.max(0, (Date.now() - lastTs) / 1000);
+    const advance = Math.floor(elapsedSec * ESTIMATED_CHARS_PER_SEC_RATE_1 * r.current.rate);
+    if (advance <= 0) return { idx: ci, off: lastCharIndex };
+    const projected = advanceCharsAcrossChunks(chunks, ci, lastCharIndex, advance);
+    const text = chunks[projected.idx] || '';
+    const snapped = advancePastWord(text, projected.off);
+    return { idx: projected.idx, off: snapped };
+  }
+
   // ─── Core speak function ────────────────────────────────────────────────────
 
   function doSpeak(startIdx, startCharOffset) {
@@ -264,6 +307,15 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
       lastResolvedChunk = chunkIdx;
       writeChunkIndex(chunkIdx);
       writeBatchEnd(chunkIdx);
+
+      // Defer the play-time scroll-into-view until audio actually starts, so
+      // the scroll motion and the first word highlight appear together
+      // instead of scroll-then-pause-then-highlight on mobile engines that
+      // take a moment to spin up.
+      if (r.current.scrollPending) {
+        r.current.scrollPending = false;
+        setScrollTrigger(t => t + 1);
+      }
 
       // If no boundary event arrives in the grace window, expand the
       // highlight to cover the whole batch. Cloud voices stay here for the
@@ -370,9 +422,9 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
     r.current.isPlaying = true;
     r.current.paused = false;
     r.current.stopped = false;
+    r.current.scrollPending = true;
     setSpeechError(null);
     setIsPlaying(true);
-    setScrollTrigger(t => t + 1);
     const { chunkIndex: ci, lastCharIndex } = r.current;
     silenceAndCancel();
     doSpeak(ci, lastCharIndex);
@@ -444,10 +496,11 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
   // `onboundary` callbacks get dropped, so wordIndex and chunkIndex (and
   // the persisted resume position) freeze at lock time even though audio
   // continued playing. On return-to-visible, cancel the in-flight utterance
-  // and re-speak from the last known position to get the highlight and
-  // saved position back in sync. A small threshold skips brief tab
-  // switches where boundary events are still flowing.
+  // and re-speak from the elapsed-time-estimated position to get the
+  // highlight and saved position back in sync. A small threshold skips
+  // brief tab switches where boundary events are still flowing.
   useEffect(() => {
+    if (!IS_MOBILE) return;
     let hiddenAt = null;
     const onVisibilityChange = () => {
       if (document.hidden) {
@@ -458,9 +511,9 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
       hiddenAt = null;
       if (hiddenMs < 1500) return;
       if (!r.current.isPlaying) return;
-      const { chunkIndex: ci, lastCharIndex } = r.current;
+      const resume = estimateResumePosition();
       silenceAndCancel();
-      doSpeak(ci, lastCharIndex);
+      doSpeak(resume.idx, resume.off);
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => document.removeEventListener('visibilitychange', onVisibilityChange);
@@ -475,6 +528,7 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
   // position. Two consecutive drained ticks before kicking avoids racing the
   // natural between-utterance gap.
   useEffect(() => {
+    if (!IS_MOBILE) return;
     if (!isPlaying) return;
     let drainedTicks = 0;
     const id = setInterval(() => {
@@ -489,9 +543,9 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
           && lastBoundaryTsRef.current
           && Date.now() - lastBoundaryTsRef.current > 6000) {
         drainedTicks = 0;
-        const { chunkIndex: ci, lastCharIndex } = r.current;
+        const resume = estimateResumePosition();
         silenceAndCancel();
-        doSpeak(ci, lastCharIndex);
+        doSpeak(resume.idx, resume.off);
         return;
       }
       if (ss.speaking || ss.pending) {
@@ -501,9 +555,9 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
       drainedTicks++;
       if (drainedTicks < 2) return;
       drainedTicks = 0;
-      const { chunkIndex: ci, lastCharIndex } = r.current;
+      const resume = estimateResumePosition();
       silenceAndCancel();
-      doSpeak(ci, lastCharIndex);
+      doSpeak(resume.idx, resume.off);
     }, 2000);
     return () => clearInterval(id);
   }, [isPlaying]); // eslint-disable-line react-hooks/exhaustive-deps

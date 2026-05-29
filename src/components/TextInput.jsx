@@ -14,6 +14,7 @@ export default function TextInput({
   setVolume,
   onStart,
   onOpenLibrary,
+  libraryPulse,
   libraryItem,
   librarySaving,
   t,
@@ -48,7 +49,7 @@ export default function TextInput({
       <div className="textarea-wrap">
         {libraryItem && (
           <div className="library-context">
-            <span className="library-context-title">{libraryItem.title}</span>
+            <span className="library-context-title">{libraryItem.title || t.libraryUntitled}</span>
             {librarySaving && <span className="library-context-saving">{t.libraryContextSaving}</span>}
           </div>
         )}
@@ -62,7 +63,7 @@ export default function TextInput({
         <div className="textarea-toolbar">
           <button
             type="button"
-            className="import-btn"
+            className={`import-btn${libraryPulse ? ' import-btn--pulse' : ''}`}
             onClick={onOpenLibrary}
             title={t.libraryOpen}
           >

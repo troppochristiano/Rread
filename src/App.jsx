@@ -122,6 +122,21 @@ export default function App() {
   const [aboutOpen, setAboutOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [libraryPulse, setLibraryPulse] = useState(
+    () => localStorage.getItem("tts_library_pulse") === "1",
+  );
+
+  function activateLibraryPulse() {
+    setLibraryPulse(true);
+    localStorage.setItem("tts_library_pulse", "1");
+  }
+  function openLibrary() {
+    setLibraryOpen(true);
+    if (libraryPulse) {
+      setLibraryPulse(false);
+      localStorage.removeItem("tts_library_pulse");
+    }
+  }
 
   const chunks = useMemo(
     () => splitIntoSentences(cleanTextForSpeech(text)),
@@ -144,6 +159,18 @@ export default function App() {
   const { clearPosition } = usePersistence({ text, chunkIndex, chunks });
 
   const [librarySaving, setLibrarySaving] = useState(false);
+
+  function handleUserTextChange(newText) {
+    setText(newText);
+    if (!library.selectedId && newText.trim()) {
+      const id = library.create('');
+      if (id) {
+        library.update(id, newText);
+        library.setSelectedId(id);
+        activateLibraryPulse();
+      }
+    }
+  }
 
   // Auto-update the selected library item when text changes.
   useEffect(() => {
@@ -239,7 +266,7 @@ export default function App() {
     <div className="app">
       {view === "input" && (
         <TextInput
-          text={text} setText={setText}
+          text={text} setText={handleUserTextChange}
           voices={voices}
           selectedVoice={selectedVoice} setSelectedVoice={setSelectedVoice}
           rate={rate} setRate={setRate}
@@ -248,7 +275,8 @@ export default function App() {
           libraryItem={library.items.find(i => i.id === library.selectedId) ?? null}
           librarySaving={librarySaving}
           onStart={handleStart}
-          onOpenLibrary={() => setLibraryOpen(true)}
+          onOpenLibrary={openLibrary}
+          libraryPulse={libraryPulse}
           onPreviewActiveChange={setPreviewActive}
           t={t}
         />

@@ -247,6 +247,31 @@ select option, select optgroup {
   opacity: 0.3;
   cursor: not-allowed;
 }
+@keyframes import-btn-pulse {
+  0%, 100% {
+    border-color: var(--ink-ghost);
+    color: var(--ink-faded);
+    box-shadow: 0 0 0 0 transparent;
+  }
+  50% {
+    border-color: var(--ink);
+    color: var(--ink);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink) 12%, transparent);
+  }
+}
+.import-btn--pulse {
+  animation: import-btn-pulse 1.4s ease-in-out infinite;
+}
+.import-btn--pulse:hover {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .import-btn--pulse {
+    animation: none;
+    border-color: var(--ink);
+    color: var(--ink);
+  }
+}
 .import-formats {
   font-family: var(--font-mono);
   letter-spacing: 0.08em;

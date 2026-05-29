@@ -109,6 +109,10 @@ export default function TextDisplay({
   // visible portion of the scroll container. Drives the Sync arrow direction.
   const [activePosition, setActivePosition] = useState("in");
   const prevExplicitRef = useRef({ scrollTrigger, scrollBump });
+  // Tracks deps from the previous run so we can detect "only isPlaying just
+  // flipped false→true" — in that case we skip, because the play-time scroll
+  // is deferred to utterance.onstart so it lands with the first word highlight.
+  const prevDepsRef = useRef({ chunkIndex, batchEndIndex, scrollTrigger, scrollBump, isPlaying, rate, chunks });
   // Anchors the tracking-scroll curve to the moment the current batch began.
   // Keyed by batch identity so 3-dots / scroll-bump re-runs keep the original
   // start time and resume scrolling from where the curve would be by now.
@@ -168,10 +172,25 @@ export default function TextDisplay({
       scrollBump !== prevExplicitRef.current.scrollBump;
     prevExplicitRef.current = { scrollTrigger, scrollBump };
 
+    const prev = prevDepsRef.current;
+    const onlyPlayStarted =
+      prev.isPlaying === false && isPlaying === true &&
+      prev.chunkIndex === chunkIndex &&
+      prev.batchEndIndex === batchEndIndex &&
+      prev.scrollTrigger === scrollTrigger &&
+      prev.scrollBump === scrollBump &&
+      prev.rate === rate &&
+      prev.chunks === chunks;
+    prevDepsRef.current = { chunkIndex, batchEndIndex, scrollTrigger, scrollBump, isPlaying, rate, chunks };
+
     if (explicitRefocus) {
       userScrolledRef.current = false;
       setUserHasScrolled(false);
     }
+    // Skip the play-time scroll until the speech engine actually starts
+    // emitting audio — useSpeech bumps scrollTrigger from utterance.onstart
+    // so the scroll and the first word highlight land together.
+    if (onlyPlayStarted) return;
     // Once the user has scrolled away, sentence/batch changes no longer drag
     // the view — the Sync button takes over.
     if (userScrolledRef.current) return;

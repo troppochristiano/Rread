@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 function IconStop() {
   return (
@@ -45,19 +45,44 @@ export default function Player({
   onCenterActive,
 }) {
   const total = chunks.length;
-  const pct = total > 0 ? (chunkIndex / total) * 100 : 0;
+  const playbackPct = total > 0 ? (chunkIndex / total) * 100 : 0;
   const [hoverPct, setHoverPct] = useState(null);
+  const [dragPct, setDragPct] = useState(null);
+  const isDragging = useRef(false);
+  const pct = dragPct !== null ? dragPct : playbackPct;
 
-  function handleProgressClick(e) {
+  function ratioFromEvent(e) {
     const rect = e.currentTarget.getBoundingClientRect();
-    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    seekTo(Math.round(ratio * (total - 1)));
+    return Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
   }
 
-  function handleMouseMove(e) {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+  function handlePointerDown(e) {
+    if (e.button !== 0) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    isDragging.current = true;
+    const ratio = ratioFromEvent(e);
     setHoverPct(ratio * 100);
+    setDragPct(ratio * 100);
+  }
+
+  function handlePointerMove(e) {
+    const ratio = ratioFromEvent(e);
+    setHoverPct(ratio * 100);
+    if (isDragging.current) setDragPct(ratio * 100);
+  }
+
+  function handlePointerUp(e) {
+    const wasDragging = isDragging.current;
+    isDragging.current = false;
+    const ratio = ratioFromEvent(e);
+    setDragPct(null);
+    if (wasDragging) {
+      seekTo(Math.round(ratio * (total - 1)));
+    }
+  }
+
+  function handlePointerLeave(e) {
+    if (!isDragging.current) setHoverPct(null);
   }
 
   const hoverSentence = hoverPct !== null && total > 0
@@ -71,9 +96,11 @@ export default function Player({
       {/* Progress bar — fixed-height wrapper keeps layout stable during bar expansion */}
       <div
         className={`progress-track${isHovering ? ' hovered' : ''}`}
-        onClick={handleProgressClick}
-        onMouseMove={handleMouseMove}
-        onMouseLeave={() => setHoverPct(null)}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerLeave={handlePointerLeave}
+        style={{ cursor: 'pointer', touchAction: 'none' }}
       >
         <div className="progress-bar">
           <div className="progress-fill" style={{ width: `${pct.toFixed(1)}%` }} />
