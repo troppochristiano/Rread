@@ -33,8 +33,8 @@ function previewOf(text) {
   return text.replace(/\s+/g, ' ').trim().slice(0, 140);
 }
 
-export default function Library({ open, onClose, onLoad, onNew, library, t }) {
-  const { items, save, remove, rename, selectedId } = library; // save used by handleFileImport
+export default function Library({ open, onClose, onLoad, onNew, onDelete, library, t }) {
+  const { items, save, rename, selectedId } = library; // save used by handleFileImport
   const [editingId, setEditingId] = useState(null);
   const [editingTitle, setEditingTitle] = useState('');
   const fileInputRef = useRef(null);
@@ -73,7 +73,7 @@ export default function Library({ open, onClose, onLoad, onNew, library, t }) {
   }
 
   function handleDelete(id) {
-    remove(id);
+    onDelete(id);
   }
 
   function startRename(item) {

@@ -1418,6 +1418,40 @@ select option, select optgroup {
 .keyboard-help-popup td:last-child {
   color: var(--ink-faded);
 }
+.keyboard-help-popup td {
+  vertical-align: middle;
+}
+.legend-section {
+  color: var(--ink-faded);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 10px;
+  font-weight: 700;
+  opacity: 0.7;
+  margin: 10px 0 4px;
+}
+.legend-section:first-of-type {
+  margin-top: 0;
+}
+.legend-icon {
+  color: var(--ink);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.legend-icon + .legend-icon {
+  margin-left: 4px;
+}
+.legend-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.legend-dots span {
+  width: 5px;
+  height: 5px;
+  background: var(--ink);
+}
 
 /* ── Library panel ──────────────────────────────────────────────────────────── */
 .library-backdrop {

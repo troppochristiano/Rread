@@ -181,9 +181,11 @@ export function useVoices() {
   }, []);
 
   useEffect(() => {
+    // Returns true once a non-empty list has been loaded, so callers can stop
+    // retrying. getVoices() is empty until the engine populates asynchronously.
     function load() {
       const raw = window.speechSynthesis.getVoices();
-      if (!raw.length) return;
+      if (!raw.length) return false;
       // Some mobile engines return the same voice twice from getVoices().
       const seen = new Set();
       const unique = raw.filter((v) => {
@@ -202,12 +204,33 @@ export function useVoices() {
         ? visible.find((v) => voiceKey(v) === saved) || visible.find((v) => v.name === saved)
         : null;
       setSelectedVoiceState((prev) => prev || match || visible[0] || null);
+      return true;
     }
 
-    load();
-    window.speechSynthesis.onvoiceschanged = load;
+    // The voiceschanged event is the source of truth, but Android Chrome
+    // frequently never fires it (and may fire before this effect mounts). Poll
+    // a few times as a fallback so the picker never sticks on an empty list.
+    let retries = 0;
+    let retryTimer = null;
+    const tryLoad = () => {
+      if (load() || retries >= 10) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+        return;
+      }
+      retries += 1;
+      retryTimer = setTimeout(tryLoad, 250);
+    };
+
+    // Re-run on every voiceschanged: Android can deliver a partial list first
+    // and a fuller one later, so we always re-read rather than unsubscribe.
+    const onChange = () => load();
+    window.speechSynthesis.addEventListener('voiceschanged', onChange);
+    tryLoad();
+
     return () => {
-      window.speechSynthesis.onvoiceschanged = null;
+      window.speechSynthesis.removeEventListener('voiceschanged', onChange);
+      if (retryTimer) clearTimeout(retryTimer);
     };
   }, []);
 

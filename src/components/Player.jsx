@@ -1,13 +1,13 @@
 import { useRef, useState } from 'react';
 
-function IconStop() {
+export function IconStop() {
   return (
     <svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor">
       <rect x="3" y="3" width="12" height="12" rx="2" />
     </svg>
   );
 }
-function IconSkipBack() {
+export function IconSkipBack() {
   return (
     <svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor">
       <polygon points="9,4 2,9 9,14" />
@@ -15,7 +15,7 @@ function IconSkipBack() {
     </svg>
   );
 }
-function IconSkipForward() {
+export function IconSkipForward() {
   return (
     <svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor">
       <polygon points="9,4 16,9 9,14" />
@@ -23,19 +23,24 @@ function IconSkipForward() {
     </svg>
   );
 }
-function IconPlay() {
+export function IconPlay() {
   return (
     <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
       <polygon points="4,2 18,10 4,18" />
     </svg>
   );
 }
-function IconPause() {
+export function IconPause() {
   return (
     <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
       <rect x="3" y="2" width="5" height="16" rx="1.5" />
       <rect x="12" y="2" width="5" height="16" rx="1.5" />
     </svg>
+  );
+}
+export function IconDots() {
+  return (
+    <span className="legend-dots"><span /><span /><span /></span>
   );
 }
 

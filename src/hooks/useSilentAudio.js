@@ -14,7 +14,7 @@ import { useCallback, useEffect, useRef } from "react";
 //   will not show a lock-screen player no matter what we do here.
 function makeSilentWavBlob() {
   const sampleRate = 8000;
-  const numSamples = 8000; // 1 second
+  const numSamples = 8000; // 1 second, loops cleanly at integer frequencies
   const buffer = new ArrayBuffer(44 + numSamples * 2);
   const view = new DataView(buffer);
   const writeString = (offset, s) => {
@@ -33,6 +33,17 @@ function makeSilentWavBlob() {
   view.setUint16(34, 16, true);
   writeString(36, "data");
   view.setUint32(40, numSamples * 2, true);
+  // NOT pure silence: Android Chrome will not grant audio focus (and therefore
+  // shows no lock-screen player and suspends speechSynthesis when the screen
+  // is off) for an all-zero track. Write a very faint sine — ~-54 dBFS at a
+  // frequency with an integer period over the 1s loop, so it's effectively
+  // inaudible but still registers as real, non-silent audio.
+  const amplitude = 64; // out of 32767 (~ -54 dBFS)
+  const freq = 220; // integer cycles per second -> clean loop boundary
+  for (let i = 0; i < numSamples; i++) {
+    const sample = Math.round(amplitude * Math.sin((2 * Math.PI * freq * i) / sampleRate));
+    view.setInt16(44 + i * 2, sample, true);
+  }
   return new Blob([buffer], { type: "audio/wav" });
 }
 
@@ -92,5 +103,21 @@ export function useSilentAudio(isPlaying) {
     }
   }, [isPlaying]);
 
-  return { unlock };
+  // Diagnostics for the lock-screen player debug overlay (?msdebug=1).
+  const getState = useCallback(() => {
+    const a = audioRef.current;
+    if (!a) return { exists: false };
+    return {
+      exists: true,
+      paused: a.paused,
+      currentTime: Number(a.currentTime.toFixed(2)),
+      readyState: a.readyState,
+      muted: a.muted,
+      volume: a.volume,
+      unlocked: unlockedRef.current,
+      error: a.error ? a.error.code : null,
+    };
+  }, []);
+
+  return { unlock, getState };
 }

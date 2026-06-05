@@ -1,5 +1,59 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import VoiceSelect from "./VoiceSelect";
+
+// Slider that scrolls fluidly during the drag but only commits the value on
+// release — mirrors the player progress bar (local drag state, seek on drop).
+function SettingSlider({ label, value, min, max, step, format, ariaLabel, onCommit }) {
+  const [dragValue, setDragValue] = useState(null);
+  const dragValueRef = useRef(null);
+  const current = dragValue !== null ? dragValue : value;
+
+  const commit = useCallback(() => {
+    if (dragValueRef.current !== null) {
+      onCommit(dragValueRef.current);
+      dragValueRef.current = null;
+      setDragValue(null);
+    }
+  }, [onCommit]);
+
+  // Catch pointer release even when it happens off the input (the thumb keeps
+  // dragging outside the element's bounds).
+  useEffect(() => {
+    window.addEventListener("pointerup", commit);
+    window.addEventListener("pointercancel", commit);
+    return () => {
+      window.removeEventListener("pointerup", commit);
+      window.removeEventListener("pointercancel", commit);
+    };
+  }, [commit]);
+
+  function handleInput(e) {
+    const v = parseFloat(e.target.value);
+    dragValueRef.current = v;
+    setDragValue(v);
+  }
+
+  return (
+    <div className="slider-row">
+      <label className="slider-label">
+        <span>{label}</span>
+        <span className="slider-value">{format(current)}</span>
+      </label>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={current}
+        aria-label={ariaLabel}
+        aria-valuetext={format(current)}
+        onChange={handleInput}
+        onKeyUp={commit}
+        onBlur={commit}
+      />
+    </div>
+  );
+}
 
 const PREVIEW_FALLBACK = {
   it: "Ciao, questa è un'anteprima della voce.",
@@ -58,6 +112,16 @@ export default function VoiceSettings({
   const [slidersOpen, setSlidersOpen] = useState(false);
   const activeRef = useRef(false);
 
+  // Local (on-device) voices can handle faster playback; cloud voices stay
+  // capped at 1.5×.
+  const maxRate = selectedVoice?.localService ? 2 : 1.5;
+
+  // When switching to a voice with a lower cap, pull an over-cap rate back down.
+  useEffect(() => {
+    if (rate > maxRate) setRate(maxRate);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [maxRate]);
+
   useEffect(() => {
     return () => {
       if (activeRef.current) {
@@ -76,7 +140,7 @@ export default function VoiceSettings({
     );
     u.voice = selectedVoice;
     u.lang = selectedVoice.lang;
-    u.rate = rate;
+    u.rate = Math.max(0.1, rate);
     u.pitch = pitch;
     u.volume = volume;
     const endPreview = () => {
@@ -178,57 +242,38 @@ export default function VoiceSettings({
 
       {(!slidersCollapsible || slidersOpen) && (
         <div className="sliders">
-          <div className="slider-row">
-            <label className="slider-label">
-              <span>{t.speed}</span>
-              <span className="slider-value">{rate.toFixed(2)}×</span>
-            </label>
-            <input
-              type="range"
-              min="0.5"
-              max="1.5"
-              step="0.05"
-              value={rate}
-              aria-label={t.speed}
-              aria-valuetext={`${rate.toFixed(2)}×`}
-              onChange={(e) => setRate(parseFloat(e.target.value))}
-            />
-          </div>
+          <SettingSlider
+            label={t.speed}
+            value={rate}
+            min="0"
+            max={maxRate}
+            step="0.01"
+            format={(v) => `${v.toFixed(2)}×`}
+            ariaLabel={t.speed}
+            onCommit={setRate}
+          />
 
-          <div className="slider-row">
-            <label className="slider-label">
-              <span>{t.pitch}</span>
-              <span className="slider-value">{pitch.toFixed(2)}</span>
-            </label>
-            <input
-              type="range"
-              min="0.10"
-              max="1.80"
-              step="0.05"
-              value={pitch}
-              aria-label={t.pitch}
-              aria-valuetext={pitch.toFixed(2)}
-              onChange={(e) => setPitch(parseFloat(e.target.value))}
-            />
-          </div>
+          <SettingSlider
+            label={t.pitch}
+            value={pitch}
+            min="0.10"
+            max="1.80"
+            step="0.01"
+            format={(v) => (((v - 0.1) / 1.7) * 2 - 1).toFixed(2)}
+            ariaLabel={t.pitch}
+            onCommit={setPitch}
+          />
 
-          <div className="slider-row">
-            <label className="slider-label">
-              <span>{t.volume}</span>
-              <span className="slider-value">{Math.round(volume * 100)}%</span>
-            </label>
-            <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.05"
-              value={volume}
-              aria-label={t.volume}
-              aria-valuetext={`${Math.round(volume * 100)}%`}
-              onChange={(e) => setVolume(parseFloat(e.target.value))}
-            />
-          </div>
-
+          <SettingSlider
+            label={t.volume}
+            value={volume}
+            min="0"
+            max="1"
+            step="0.01"
+            format={(v) => `${Math.round(v * 100)}%`}
+            ariaLabel={t.volume}
+            onCommit={setVolume}
+          />
         </div>
       )}
 

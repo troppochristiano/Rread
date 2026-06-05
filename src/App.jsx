@@ -8,6 +8,7 @@ import {
 import { useSpeech } from "./hooks/useSpeech";
 import { useMediaSession } from "./hooks/useMediaSession";
 import { useSilentAudio } from "./hooks/useSilentAudio";
+import { useWakeLock } from "./hooks/useWakeLock";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useLibrary } from "./hooks/useLibrary";
 import { cleanTextForSpeech } from "./utils/textCleaner";
@@ -15,7 +16,7 @@ import { splitIntoSentences } from "./utils/textSplitter";
 import { translations } from "./i18n";
 import TextInput from "./components/TextInput";
 import TextDisplay from "./components/TextDisplay";
-import Player from "./components/Player";
+import Player, { IconStop, IconSkipBack, IconSkipForward, IconPlay, IconPause, IconDots } from "./components/Player";
 import VoiceSettings from "./components/VoiceSettings";
 import ResumePrompt from "./components/ResumePrompt";
 import AboutModal from "./components/AboutModal";
@@ -49,11 +50,12 @@ function IconInfo() {
   );
 }
 
-function IconKeyboard() {
+function IconControls() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="2" y="6" width="20" height="12" rx="2"/>
-      <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8"/>
+      <circle cx="12" cy="12" r="10"/>
+      <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+      <line x1="12" y1="17" x2="12.01" y2="17"/>
     </svg>
   );
 }
@@ -148,7 +150,10 @@ export default function App() {
     play, pause, stop, skip, seekTo,
     speechError, clearSpeechError,
     wordHighlightSupported, dismissWordHighlightWarning,
-  } = useSpeech({ chunks, selectedVoice, rate, pitch, volume });
+    // The slider can show a rate below 0.10×, but the API ignores anything
+    // under 0.10 (voice reverts to normal speed) — clamp before it reaches the
+    // engine while leaving the displayed value untouched.
+  } = useSpeech({ chunks, selectedVoice, rate: Math.max(0.1, rate), pitch, volume });
 
   // Pause the voice probe while the user is listening so probe utterances
   // don't fight with playback for the speech queue.
@@ -260,7 +265,33 @@ export default function App() {
     onSkip: skip,
   });
 
-  const { unlock: unlockSilentAudio } = useSilentAudio(isPlaying);
+  const { unlock: unlockSilentAudio, getState: getSilentAudioState } = useSilentAudio(isPlaying);
+
+  // Android only: hold a screen wake lock while playing so the display doesn't
+  // blank (which on Android suspends the page and stalls playback).
+  useWakeLock(isPlaying);
+
+  // Lock-screen player diagnostics, only when ?msdebug=1 is in the URL.
+  const msDebug = typeof window !== "undefined" && window.location.search.includes("msdebug");
+  const [msDebugInfo, setMsDebugInfo] = useState(null);
+  useEffect(() => {
+    if (!msDebug) return;
+    const tick = () => {
+      const ms = "mediaSession" in navigator ? navigator.mediaSession : null;
+      setMsDebugInfo({
+        mediaSession: !!ms,
+        playbackState: ms ? ms.playbackState : "n/a",
+        hasMetadata: ms ? !!ms.metadata : false,
+        setPositionState: ms ? typeof ms.setPositionState === "function" : false,
+        isPlaying,
+        active: view === "player",
+        audio: getSilentAudioState(),
+      });
+    };
+    tick();
+    const id = setInterval(tick, 500);
+    return () => clearInterval(id);
+  }, [msDebug, isPlaying, view, getSilentAudioState]);
 
   return (
     <div className="app">
@@ -366,18 +397,29 @@ export default function App() {
             aria-label={t.shortcutsTitle}
             aria-expanded={shortcutsOpen}
           >
-            <IconKeyboard />
+            <IconControls />
           </button>
           {shortcutsOpen && (
             <>
               <div className="keyboard-help-backdrop" onClick={() => setShortcutsOpen(false)} />
               <div className="keyboard-help-popup" role="tooltip">
                 <div className="keyboard-help-title">{t.shortcutsTitle}</div>
+
+                <div className="legend-section">{t.legendKeyboard}</div>
                 <table><tbody>
                   <tr><td>Space</td><td>{t.shortcutSpace.replace(/^Spazio — |^Space — /, '')}</td></tr>
                   <tr><td>←</td><td>{t.shortcutLeft.replace(/^← — /, '')}</td></tr>
                   <tr><td>→</td><td>{t.shortcutRight.replace(/^→ — /, '')}</td></tr>
                   <tr><td>Esc</td><td>{t.shortcutEsc.replace(/^Esc — /, '')}</td></tr>
+                </tbody></table>
+
+                <div className="legend-section">{t.legendButtons}</div>
+                <table><tbody>
+                  <tr><td><span className="legend-icon"><IconStop /></span></td><td>{t.stopTitle}</td></tr>
+                  <tr><td><span className="legend-icon"><IconSkipBack /></span></td><td>{t.prevSentence}</td></tr>
+                  <tr><td><span className="legend-icon"><IconPlay /></span><span className="legend-icon"><IconPause /></span></td><td>{t.playTitle} / {t.pauseTitle}</td></tr>
+                  <tr><td><span className="legend-icon"><IconSkipForward /></span></td><td>{t.nextSentence}</td></tr>
+                  <tr><td><span className="legend-icon"><IconDots /></span></td><td>{t.goToHighlighted}</td></tr>
                 </tbody></table>
               </div>
             </>
@@ -431,6 +473,19 @@ export default function App() {
         </div>
       )}
 
+      {msDebug && msDebugInfo && (
+        <pre
+          style={{
+            position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 9999,
+            margin: 0, padding: "8px 10px", fontSize: 11, lineHeight: 1.4,
+            background: "rgba(0,0,0,0.85)", color: "#0f0", whiteSpace: "pre-wrap",
+            fontFamily: "monospace", pointerEvents: "none",
+          }}
+        >
+          {JSON.stringify(msDebugInfo, null, 1)}
+        </pre>
+      )}
+
       {aboutOpen && <AboutModal locale={locale} onClose={() => setAboutOpen(false)} />}
 
       <Library
@@ -443,6 +498,10 @@ export default function App() {
           return id;
         }}
         onLoad={(item) => { setText(item.text); library.setSelectedId(item.id); }}
+        onDelete={(id) => {
+          if (id === library.selectedId) setText('');
+          library.remove(id);
+        }}
         library={library}
         t={t}
       />
