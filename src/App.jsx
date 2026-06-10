@@ -118,7 +118,10 @@ export default function App() {
   const toggleTheme = useCallback(() => setTheme(th => th === "light" ? "dark" : "light"), []);
 
   const [rate, setRate] = useState(1);
-  const [pitch, setPitch] = useState(1);
+  // 0.95 is the pitch slider's neutral point (midpoint of its 0.10–1.80 track,
+  // and its snap target) — it's what displays as "0.00". Starting at 1 would
+  // show a non-zero "0.06" on load.
+  const [pitch, setPitch] = useState(0.95);
   const [volume, setVolume] = useState(1);
   const [view, setView] = useState("input");
   const [resumePosition, setResumePosition] = useState(null);

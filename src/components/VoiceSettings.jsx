@@ -148,10 +148,17 @@ export default function VoiceSettings({
   // ratio of caps so it keeps the same proportion of the available range —
   // e.g. 2× on a local voice (max 2×) becomes 1.5× on a cloud voice (max 1.5×).
   const prevMaxRate = useRef(maxRate);
+  const hadVoiceRef = useRef(!!selectedVoice);
   useEffect(() => {
+    const hadVoice = hadVoiceRef.current;
+    hadVoiceRef.current = !!selectedVoice;
     const oldMax = prevMaxRate.current;
     prevMaxRate.current = maxRate;
-    if (oldMax === maxRate) return;
+    // Skip the initial voice load: before any voice is selected the cap is the
+    // no-voice default (1.5), and the first real voice can bump it to 2 — that's
+    // not a voice *switch*, so rescaling there would shift the starting rate
+    // (e.g. 1× → 1.33×). Only rescale when moving between two real voices.
+    if (!hadVoice || oldMax === maxRate) return;
     setRate((r) => Math.min(maxRate, Math.round(r * (maxRate / oldMax) * 100) / 100));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [maxRate]);
