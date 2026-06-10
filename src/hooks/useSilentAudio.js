@@ -14,7 +14,13 @@ import { useCallback, useEffect, useRef } from "react";
 //   will not show a lock-screen player no matter what we do here.
 function makeSilentWavBlob() {
   const sampleRate = 8000;
-  const numSamples = 8000; // 1 second, loops cleanly at integer frequencies
+  // Desktop Chrome/Edge hide media from the Windows lock-screen / SMTC (Global
+  // Media Controls) when the element's duration is under ~5s — short clips are
+  // treated as UI "sounds" and filtered out. (Android's media notification has
+  // no such rule, which is why a 1s loop was enough there.) Use a 30s clip so
+  // the PC media player actually appears. freq below has an integer number of
+  // cycles over the whole clip, so it still loops seamlessly.
+  const numSamples = sampleRate * 30; // 30 seconds
   const buffer = new ArrayBuffer(44 + numSamples * 2);
   const view = new DataView(buffer);
   const writeString = (offset, s) => {
@@ -64,7 +70,7 @@ function createSilentAudio() {
   return audio;
 }
 
-export function useSilentAudio(isPlaying) {
+export function useSilentAudio(isPlaying, keepAlive = false) {
   const audioRef = useRef(null);
   const unlockedRef = useRef(false);
 
@@ -93,15 +99,23 @@ export function useSilentAudio(isPlaying) {
     }
   }, []);
 
+  // Keep the silent track playing for the whole reading session (keepAlive),
+  // not only while speech is sounding. The system media session — and with it
+  // the Windows lock-screen / SMTC player — only stays registered while a real
+  // audio element is playing. Holding it alive while paused/stopped means that
+  // when the PC is locked ("blocked") the media player is still shown, sitting
+  // in a paused state (useMediaSession reports playbackState="paused"), so its
+  // Play button is available and routes back through the MediaSession "play"
+  // action into useSpeech — i.e. you can start playback from the locked PC.
   useEffect(() => {
     const a = audioRef.current;
     if (!a) return;
-    if (isPlaying) {
+    if (isPlaying || keepAlive) {
       a.play().catch(() => { /* not yet unlocked; will retry on next user gesture */ });
     } else {
       a.pause();
     }
-  }, [isPlaying]);
+  }, [isPlaying, keepAlive]);
 
   // Diagnostics for the lock-screen player debug overlay (?msdebug=1).
   const getState = useCallback(() => {

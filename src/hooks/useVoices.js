@@ -346,7 +346,7 @@ export function useVoices() {
         setProbeProgress({ done: 0, total: 0 });
       }
     }
-  }, []);
+  }, [isUserSpeechActive]);
 
   // Auto-probe on load. If a full probe was never completed (first run) or
   // was interrupted mid-way, probe every voice with the unbounded cap.
@@ -366,6 +366,7 @@ export function useVoices() {
     }
     if (neverDone && !resumeFull) setFullProbeFlag(true);
     const alreadyDone = candidates.length - todo.length;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- runProbe drives async background probing
     runProbe(todo, { unbounded: true, startOffset: alreadyDone, totalCount: candidates.length });
   }, [allVoices, runProbe]);
 
@@ -394,6 +395,7 @@ export function useVoices() {
 
   useEffect(() => {
     if (selectedVoice && brokenSet.has(voiceKey(selectedVoice))) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- reset selection when current voice becomes broken
       setSelectedVoiceState(voices[0] || null);
     }
   }, [brokenSet, selectedVoice, voices]);

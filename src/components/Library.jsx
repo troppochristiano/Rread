@@ -66,7 +66,8 @@ export default function Library({ open, onClose, onLoad, onNew, onDelete, librar
       }
     } catch (err) {
       console.error("Import failed:", err);
-      setImportError(t.importError);
+      const detail = err?.message || String(err);
+      setImportError(`${t.importError}: ${err?.name ? `${err.name} — ` : ""}${detail}`);
     } finally {
       setImporting(false);
     }

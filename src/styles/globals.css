@@ -43,6 +43,8 @@ button {
   font: inherit;
   background: none;
   border: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 input[type="range"] {
@@ -285,6 +287,11 @@ select option, select optgroup {
   font-family: var(--font-mono);
   color: var(--ink);
   font-size: 0.65rem;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: pre-wrap;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .input-settings {
@@ -1281,8 +1288,17 @@ select option, select optgroup {
 
 /* ── Responsive ─────────────────────────────────────────────────────────────── */
 @media (max-width: 500px) {
+  /* Player view: allow vertical scrolling only — never let a long word or
+     wide element pan the reader sideways. */
+  .text-display {
+    overflow-x: hidden;
+    touch-action: pan-y;
+  }
   .text-content {
     font-size: 0.92rem;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
   .input-view {
     padding: 28px 16px 32px;

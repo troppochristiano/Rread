@@ -2,7 +2,9 @@ import { useEffect, useRef } from 'react';
 
 export function useKeyboardShortcuts({ active, isPlaying, play, pause, skip, stop }) {
   const ref = useRef({});
-  ref.current = { isPlaying, play, pause, skip, stop };
+  useEffect(() => {
+    ref.current = { isPlaying, play, pause, skip, stop };
+  });
 
   useEffect(() => {
     if (!active) return;

@@ -25,7 +25,40 @@ export async function importFileToText(file) {
   throw new Error(`Unsupported file type: ${name || type || "unknown"}`);
 }
 
+// iOS Safari < 17.4 supports ReadableStream but not async iteration over it
+// (`for await (… of stream)`), which pdf.js relies on during text extraction.
+// Adding the iterator lets PDFs import on those older devices.
+function ensureReadableStreamAsyncIterator() {
+  if (typeof ReadableStream === "undefined") return;
+  const proto = ReadableStream.prototype;
+  if (proto[Symbol.asyncIterator]) return;
+
+  proto[Symbol.asyncIterator] = function ({ preventCancel = false } = {}) {
+    const reader = this.getReader();
+    return {
+      next() {
+        return reader.read();
+      },
+      async return(value) {
+        if (preventCancel) {
+          reader.releaseLock();
+        } else {
+          const cancelPromise = reader.cancel(value);
+          reader.releaseLock();
+          await cancelPromise;
+        }
+        return { done: true, value };
+      },
+      [Symbol.asyncIterator]() {
+        return this;
+      },
+    };
+  };
+  if (!proto.values) proto.values = proto[Symbol.asyncIterator];
+}
+
 async function readPdf(arrayBuffer) {
+  ensureReadableStreamAsyncIterator();
   const pdfjs = await import("pdfjs-dist");
   const workerUrl = (await import("pdfjs-dist/build/pdf.worker.min.mjs?url")).default;
   if (!pdfjs.GlobalWorkerOptions.workerSrc) {

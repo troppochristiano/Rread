@@ -3,12 +3,27 @@ import VoiceSelect from "./VoiceSelect";
 
 // Slider that scrolls fluidly during the drag but only commits the value on
 // release — mirrors the player progress bar (local drag state, seek on drop).
-function SettingSlider({ label, value, min, max, step, format, ariaLabel, onCommit }) {
+function SettingSlider({ label, value, min, max, step, format, ariaLabel, onCommit, snap, cap }) {
   const [dragValue, setDragValue] = useState(null);
   const dragValueRef = useRef(null);
+  const pointerDragRef = useRef(false);
   const current = dragValue !== null ? dragValue : value;
 
+  // Pull the value to `snap` (the default/normal setting) when a pointer drag
+  // lands within a small band of it, so users can flick back to default easily.
+  // Only applied to pointer drags — the snap band is wider than a keyboard
+  // step, so snapping arrow-key changes would trap the value at the default.
+  const snapValue = useCallback(
+    (v) => {
+      if (snap == null || !pointerDragRef.current) return v;
+      const threshold = (parseFloat(max) - parseFloat(min)) * 0.04;
+      return Math.abs(v - snap) <= threshold ? snap : v;
+    },
+    [snap, min, max],
+  );
+
   const commit = useCallback(() => {
+    pointerDragRef.current = false;
     if (dragValueRef.current !== null) {
       onCommit(dragValueRef.current);
       dragValueRef.current = null;
@@ -28,7 +43,11 @@ function SettingSlider({ label, value, min, max, step, format, ariaLabel, onComm
   }, [commit]);
 
   function handleInput(e) {
-    const v = parseFloat(e.target.value);
+    // Display scale can run past the functional cap (e.g. speed shows a fixed
+    // 0–2 track but a cloud voice only allows up to 1.5×), so clamp here.
+    let v = parseFloat(e.target.value);
+    if (cap != null) v = Math.min(v, cap);
+    v = snapValue(v);
     dragValueRef.current = v;
     setDragValue(v);
   }
@@ -47,6 +66,7 @@ function SettingSlider({ label, value, min, max, step, format, ariaLabel, onComm
         value={current}
         aria-label={ariaLabel}
         aria-valuetext={format(current)}
+        onPointerDown={() => { pointerDragRef.current = true; }}
         onChange={handleInput}
         onKeyUp={commit}
         onBlur={commit}
@@ -83,6 +103,14 @@ function IconPlay() {
   );
 }
 
+// iOS on-device voices distort badly past 1.5× even though they report
+// localService, so they get the same cap as cloud voices. (Covers iPadOS,
+// which reports as "Macintosh" with a touch screen.)
+const IS_IOS =
+  typeof navigator !== "undefined" &&
+  (/iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+    (/Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1));
+
 function IconStop() {
   return (
     <svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor">
@@ -112,13 +140,19 @@ export default function VoiceSettings({
   const [slidersOpen, setSlidersOpen] = useState(false);
   const activeRef = useRef(false);
 
-  // Local (on-device) voices can handle faster playback; cloud voices stay
-  // capped at 1.5×.
-  const maxRate = selectedVoice?.localService ? 2 : 1.5;
+  // Local (on-device) voices can handle faster playback; cloud voices — and
+  // iOS voices, which distort past 1.5× — stay capped at 1.5×.
+  const maxRate = selectedVoice?.localService && !IS_IOS ? 2 : 1.5;
 
-  // When switching to a voice with a lower cap, pull an over-cap rate back down.
+  // When switching to a voice with a different cap, rescale the rate by the
+  // ratio of caps so it keeps the same proportion of the available range —
+  // e.g. 2× on a local voice (max 2×) becomes 1.5× on a cloud voice (max 1.5×).
+  const prevMaxRate = useRef(maxRate);
   useEffect(() => {
-    if (rate > maxRate) setRate(maxRate);
+    const oldMax = prevMaxRate.current;
+    prevMaxRate.current = maxRate;
+    if (oldMax === maxRate) return;
+    setRate((r) => Math.min(maxRate, Math.round(r * (maxRate / oldMax) * 100) / 100));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [maxRate]);
 
@@ -246,11 +280,13 @@ export default function VoiceSettings({
             label={t.speed}
             value={rate}
             min="0"
-            max={maxRate}
+            max="2"
+            cap={maxRate}
             step="0.01"
             format={(v) => `${v.toFixed(2)}×`}
             ariaLabel={t.speed}
             onCommit={setRate}
+            snap={1}
           />
 
           <SettingSlider
@@ -262,6 +298,7 @@ export default function VoiceSettings({
             format={(v) => (((v - 0.1) / 1.7) * 2 - 1).toFixed(2)}
             ariaLabel={t.pitch}
             onCommit={setPitch}
+            snap={0.95}
           />
 
           <SettingSlider

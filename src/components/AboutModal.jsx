@@ -5,16 +5,12 @@ const content = {
     sections: [
       {
         heading: "Perché ho creato questo sito",
-        body: "Volevo uno strumento text-to-speech illimitato e gratuito, che funzionasse interamente nel browser — senza account, senza abbonamenti, senza limiti di caratteri. Basta incollare il testo e ascoltarlo.",
+        body: "Volevo uno strumento text-to-speech illimitato e gratuito, che funzionasse interamente nel browser — senza account, senza abbonamenti, senza limiti di caratteri. Basta incollare il testo e ascoltarlo. La sintesi vocale usa la Web Speech API, integrata direttamente nel browser: le voci sono quelle del tuo sistema operativo, quindi tutto avviene sul dispositivo, senza inviare il testo a un server.",
       },
       {
-        heading: "A cosa serve",
-        body: "Leggere articoli, post, documenti e libri a mani libere. Correggere i propri testi ascoltandoli. Studiare lingue sentendo come suonano le parole a velocità o voci diverse.",
-      },
-      {
-        heading: "Salvataggio automatico",
+        heading: "La libreria",
         body: [
-          "Il testo incollato e il punto di ascolto vengono salvati automaticamente nel browser. Puoi chiudere la pagina e riprendere esattamente da dove avevi lasciato — perfetto per usarlo come narratore di libri in formato testo (ad esempio quelli scaricabili gratuitamente dal ",
+          "Salva tutti i testi che vuoi nella libreria: puoi incollarli o importare file, anche PDF. Ogni testo conserva il punto di ascolto e l'avanzamento, così puoi chiudere la pagina e riprendere esattamente da dove avevi lasciato. Perfetta per usare il sito come narratore di libri ed ebook (ad esempio quelli scaricabili gratuitamente dal ",
           { text: "Progetto Gutenberg", href: "https://www.gutenberg.org/" },
           ").",
         ],
@@ -37,16 +33,12 @@ const content = {
     sections: [
       {
         heading: "Why I built this",
-        body: "I wanted a completly free and unlimited text-to-speech tool that works entirely in the browser — no accounts, no subcriptions, no word limit. Just paste your text and listen.",
+        body: "I wanted a completly free and unlimited text-to-speech tool that works entirely in the browser — no accounts, no subcriptions, no word limit. Just paste your text and listen. The speech is generated with the browser's built-in Web Speech API, using the voices from your operating system, so everything runs on your device — your text is never sent to a server.",
       },
       {
-        heading: "What you can use it for",
-        body: "Reading articles, blog posts, documents or books hands-free. Proofreading your own writing by listening to it. Language learning — hear how text sounds in different voices or at different speeds.",
-      },
-      {
-        heading: "Automatic saving",
+        heading: "The library",
         body: [
-          "Your pasted text and listening position are saved automatically in the browser. You can close the page and resume exactly where you left off — perfect for using it as a narrator for plain-text books (for example those available for free from ",
+          "Save as many texts as you like in the library — paste them in or import files, including PDFs. Each text keeps its own listening position and progress, so you can close the page and resume exactly where you left off. Perfect for using the site as a narrator for books and ebooks (for example those available for free from ",
           { text: "Project Gutenberg", href: "https://www.gutenberg.org/" },
           ").",
         ],

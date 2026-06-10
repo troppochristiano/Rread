@@ -86,7 +86,7 @@ export default function Player({
     }
   }
 
-  function handlePointerLeave(e) {
+  function handlePointerLeave() {
     if (!isDragging.current) setHoverPct(null);
   }
 

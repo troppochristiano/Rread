@@ -23,6 +23,11 @@ import AboutModal from "./components/AboutModal";
 import Library from "./components/Library";
 import "./styles/globals.css";
 
+// The voice-probing feature is only useful on Edge, whose read-aloud "Online"
+// voices need to be woken up before they appear/work reliably.
+const IS_EDGE =
+  typeof navigator !== "undefined" && /\bEdg\//.test(navigator.userAgent);
+
 function IconSun() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -180,6 +185,7 @@ export default function App() {
   // Auto-update the selected library item when text changes.
   useEffect(() => {
     if (!library.selectedId) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- debounced save indicator
     setLibrarySaving(true);
     const timer = setTimeout(() => {
       library.update(library.selectedId, text);
@@ -265,7 +271,10 @@ export default function App() {
     onSkip: skip,
   });
 
-  const { unlock: unlockSilentAudio, getState: getSilentAudioState } = useSilentAudio(isPlaying);
+  // Pass the player view as `keepAlive` so the silent track keeps the OS media
+  // session registered even when paused/stopped. That way a locked ("blocked")
+  // PC still shows the media player, sitting paused, and its Play button works.
+  const { unlock: unlockSilentAudio, getState: getSilentAudioState } = useSilentAudio(isPlaying, view === "player");
 
   // Android only: hold a screen wake lock while playing so the display doesn't
   // blank (which on Android suspends the page and stalls playback).
@@ -431,6 +440,7 @@ export default function App() {
         <button className="corner-btn desktop-only" onClick={toggleTheme} title={theme === "dark" ? t.lightMode : t.darkMode} aria-label={theme === "dark" ? t.lightMode : t.darkMode}>
           {theme === "dark" ? <IconSun /> : <IconMoon />}
         </button>
+        {IS_EDGE && (
         <button
           className={`corner-btn corner-btn-sync desktop-only ${isProbing ? "probing" : ""}`}
           onClick={isProbing ? stopProbe : reprobe}
@@ -452,6 +462,7 @@ export default function App() {
             <IconRefresh />
           )}
         </button>
+        )}
         {view === "input" && (
           <button className="corner-btn mobile-only" onClick={() => setMobileMenuOpen(o => !o)} title={t.ariaMenuOpen} aria-label={t.ariaMenuOpen}>
             <IconSliders />

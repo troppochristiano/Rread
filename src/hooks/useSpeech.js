@@ -159,6 +159,13 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
   // throttled (typically by an iOS screen lock with active audio session)
   // and the highlight/position has frozen even though audio kept going.
   const lastBoundaryTsRef = useRef(0);
+  // True once the page has been hidden during the current playback (screen
+  // lock / tab switch). Gates the elapsed-time forward projection and the
+  // whole-batch fallbacks: while the page stays visible, boundary events are
+  // authoritative even when sparse, so those throttle-recovery paths must NOT
+  // fire — otherwise they cancel/reseek a healthy engine and the highlight
+  // jumps around. Reset back to false once a visible re-speak consumes it.
+  const wasHiddenRef = useRef(false);
 
   // wordIndex is not React state — updates go directly to subscribers so only
   // CurrentChunk re-renders on each boundary event, not the entire App tree.
@@ -223,7 +230,10 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
     const { chunkIndex: ci, lastCharIndex } = r.current;
     const chunks = r.current.chunks;
     const lastTs = lastBoundaryTsRef.current;
-    if (!lastTs || !boundarySeenForVoiceRef.current) {
+    // Only project forward if the page was actually hidden while playing.
+    // While visible, boundary events track the true position even when sparse,
+    // so projecting past lastCharIndex would skip the highlight ahead.
+    if (!lastTs || !boundarySeenForVoiceRef.current || !wasHiddenRef.current) {
       return { idx: ci, off: lastCharIndex };
     }
     const elapsedSec = Math.max(0, (Date.now() - lastTs) / 1000);
@@ -264,6 +274,45 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
     let reArmTimer = null;
     let lastResolvedChunk = -1;
 
+    // Word tokens of this utterance, used to re-anchor unreliable boundary
+    // charIndex values (see locateChar). Some mobile engines report a charIndex
+    // that lands on the WRONG occurrence of a repeated word — e.g. while
+    // speaking the first "28 August" they report the index of a later
+    // identical "28 August" elsewhere in the batch, so the highlight jumps to
+    // the wrong place. Built once per utterance.
+    const utterTokens = [];
+    {
+      const re = /\S+/g;
+      let m;
+      while ((m = re.exec(text)) !== null) utterTokens.push({ text: m[0], start: m.index });
+    }
+    // Monotonic cursor (index into utterTokens) marking how far audio has
+    // progressed. Words are spoken in order, so we only ever search forward.
+    let tokenCursor = 0;
+
+    const wordCovering = (idx) => {
+      for (let k = 0; k < utterTokens.length; k++) {
+        const tk = utterTokens[k];
+        if (idx >= tk.start && idx < tk.start + tk.text.length) return tk.text;
+      }
+      return '';
+    };
+
+    // Map the engine's (possibly wrong-occurrence) charIndex to a trustworthy
+    // char position: take the word the engine *names* and re-locate it at the
+    // next occurrence from our monotonic cursor. For well-behaved engines the
+    // next occurrence IS the reported one, so behaviour is unchanged. If the
+    // word can't be matched ahead (engine normalized it, or jumped backward),
+    // fall back to the raw index — no worse than before.
+    const locateChar = (engineChar) => {
+      const w = wordCovering(engineChar);
+      if (!w) return engineChar;
+      for (let k = tokenCursor; k < utterTokens.length; k++) {
+        if (utterTokens[k].text === w) { tokenCursor = k; return utterTokens[k].start; }
+      }
+      return engineChar;
+    };
+
     const isAlive = () => gen > r.current.cancelThru;
     const isActive = () => r.current.activeGen === gen && isAlive();
 
@@ -285,7 +334,8 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
     // highlight and the word highlight, and collapses any batch-wide highlight
     // back to the single active chunk.
     const applyChar = (charInUtterance) => {
-      const { chunkIdx, localChar } = resolveBoundary(charInUtterance, boundaries);
+      const located = locateChar(charInUtterance);
+      const { chunkIdx, localChar } = resolveBoundary(located, boundaries);
       if (chunkIdx !== lastResolvedChunk) {
         lastResolvedChunk = chunkIdx;
         writeChunkIndex(chunkIdx);
@@ -323,6 +373,12 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
       graceTimer = setTimeout(() => {
         graceTimer = null;
         if (!isActive()) return;
+        // Once this voice has been confirmed to emit boundary events, don't
+        // flash the whole-batch highlight (and its autoscroll) just because
+        // the first boundary of this utterance is a little late — common on
+        // mobile engines. Only voices that have never emitted a boundary
+        // (cloud voices) fall through to the whole-batch fallback.
+        if (boundarySeenForVoiceRef.current) return;
         expandToBatch();
       }, ESTIMATOR_GRACE_MS);
 
@@ -358,6 +414,12 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
       reArmTimer = setTimeout(() => {
         reArmTimer = null;
         if (!isActive()) return;
+        // A gap between boundary events only means audio froze (and we should
+        // fall back to whole-batch highlight) when JS was actually throttled —
+        // i.e. the page is hidden. While visible, sparse boundaries are normal
+        // on mobile engines, so keep the current word highlight in place
+        // instead of expanding to the whole batch and triggering autoscroll.
+        if (!document.hidden) return;
         expandToBatch();
       }, BOUNDARY_SILENCE_MS);
     };
@@ -505,13 +567,18 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
     const onVisibilityChange = () => {
       if (document.hidden) {
         hiddenAt = Date.now();
+        wasHiddenRef.current = true;
         return;
       }
       const hiddenMs = hiddenAt ? Date.now() - hiddenAt : 0;
       hiddenAt = null;
-      if (hiddenMs < 1500) return;
-      if (!r.current.isPlaying) return;
+      if (hiddenMs < 1500) { wasHiddenRef.current = false; return; }
+      if (!r.current.isPlaying) { wasHiddenRef.current = false; return; }
+      // Project from the elapsed-time estimate (wasHiddenRef is still true
+      // here), then clear it so later visible re-kicks resume from the exact
+      // last boundary position rather than guessing ahead.
       const resume = estimateResumePosition();
+      wasHiddenRef.current = false;
       silenceAndCancel();
       doSpeak(resume.idx, resume.off);
     };
@@ -536,10 +603,12 @@ export function useSpeech({ chunks, selectedVoice, rate, pitch, volume }) {
       const ss = window.speechSynthesis;
       // Boundary-silence re-kick: covers the iOS screen-lock case where the
       // audio session stayed alive but boundary callbacks were throttled, so
-      // the engine is still speaking but our highlight/position froze. Only
-      // act if we've already confirmed this voice emits boundary events,
+      // the engine is still speaking but our highlight/position froze. Gated
+      // on document.hidden — while the page is visible, sparse boundary events
+      // are normal on some mobile engines and must not trigger a cancel/reseek
+      // of a healthy engine. Also requires a confirmed boundary-emitting voice,
       // otherwise we'd thrash on cloud voices that legitimately never emit.
-      if (ss.speaking && boundarySeenForVoiceRef.current
+      if (document.hidden && ss.speaking && boundarySeenForVoiceRef.current
           && lastBoundaryTsRef.current
           && Date.now() - lastBoundaryTsRef.current > 6000) {
         drainedTicks = 0;
