@@ -1,10 +1,10 @@
-<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
-  <rect width="32" height="32" rx="6" fill="#1a1917"/>
-  <text x="16" y="22"
+<svg width="48" height="48" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+  <rect width="48" height="48" rx="10" fill="#1a1917"/>
+  <text x="24" y="33"
     text-anchor="middle"
     font-family="'Courier New', Courier, monospace"
     font-weight="700"
-    font-size="16"
+    font-size="24"
     fill="#ffffff"
-    letter-spacing="1">RR</text>
+    letter-spacing="1.5">RR</text>
 </svg>
