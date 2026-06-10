@@ -3,9 +3,65 @@
     <head>
         <meta charset="UTF-8" />
         <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+        <link rel="icon" type="image/x-icon" href="/favicon.ico" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <meta name="theme-color" content="#0f0f12" />
-        <title>RRead — Text to Speech</title>
+
+        <!-- Primary SEO -->
+        <title>RRead — Free Unlimited Text to Speech, Runs Locally in Your Browser</title>
+        <meta name="description" content="RRead is a free, unlimited text-to-speech reader that runs entirely in your browser. Paste text or import PDF, EPUB, TXT and MD files and listen — no signup, no API keys, no uploads. Everything is processed locally and privately on your device." />
+        <meta name="keywords" content="free text to speech, unlimited tts, text to speech online, browser tts, local text to speech, private text to speech, read aloud, pdf to speech, epub to speech, tts reader, no signup text to speech, offline text to speech" />
+        <meta name="author" content="RRead" />
+        <meta name="robots" content="index, follow, max-image-preview:large" />
+        <link rel="canonical" href="https://rread.org/" />
+
+        <!-- Open Graph (Facebook, LinkedIn, etc.) -->
+        <meta property="og:type" content="website" />
+        <meta property="og:site_name" content="RRead" />
+        <meta property="og:title" content="RRead — Free Unlimited Text to Speech, Runs Locally" />
+        <meta property="og:description" content="Free, unlimited text-to-speech that runs entirely in your browser. Paste text or import PDF/EPUB and listen — no signup, no uploads, processed privately on your device." />
+        <meta property="og:url" content="https://rread.org/" />
+        <meta property="og:image" content="https://rread.org/og-image.png" />
+        <meta property="og:image:alt" content="RRead text-to-speech reader interface" />
+        <meta property="og:locale" content="en_US" />
+        <meta property="og:locale:alternate" content="it_IT" />
+
+        <!-- Twitter / X Card -->
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content="RRead — Free Unlimited Text to Speech, Runs Locally" />
+        <meta name="twitter:description" content="Free, unlimited text-to-speech that runs entirely in your browser. No signup, no uploads — processed privately on your device." />
+        <meta name="twitter:image" content="https://rread.org/og-image.png" />
+        <meta name="twitter:image:alt" content="RRead text-to-speech reader interface" />
+
+        <!-- Structured data: helps Google show a rich result -->
+        <script type="application/ld+json">
+        {
+          "@context": "https://schema.org",
+          "@type": "WebApplication",
+          "name": "RRead",
+          "url": "https://rread.org/",
+          "description": "A free, unlimited text-to-speech reader that runs entirely in your browser. Import PDF, EPUB, TXT and MD files or paste text and listen — nothing is uploaded and everything is processed locally on your device.",
+          "applicationCategory": "UtilityApplication",
+          "operatingSystem": "Any (web browser)",
+          "browserRequirements": "Requires a modern browser with the Web Speech API",
+          "inLanguage": ["en", "it"],
+          "isAccessibleForFree": true,
+          "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "USD"
+          },
+          "featureList": [
+            "Free and unlimited text-to-speech generation",
+            "Runs entirely in the browser — no uploads, no account",
+            "Import PDF, EPUB, TXT and MD documents",
+            "Word-level highlighting synced with speech",
+            "Adjustable speed, pitch and volume",
+            "Resume reading where you left off"
+          ]
+        }
+        </script>
+
         <script>
           const saved = localStorage.getItem("theme");
           const isDark = saved === "dark" || (!saved && window.matchMedia("(prefers-color-scheme: dark)").matches);
@@ -14,6 +70,17 @@
     </head>
     <body>
         <div id="root"></div>
+        <noscript>
+            <h1>RRead — Free Unlimited Text to Speech</h1>
+            <p>
+                RRead is a free, unlimited text-to-speech reader that runs
+                entirely in your browser. Paste text or import PDF, EPUB, TXT
+                and MD files and listen to them read aloud. Nothing is uploaded
+                and everything is processed locally and privately on your
+                device — no signup, no API keys, no limits. Please enable
+                JavaScript to use RRead.
+            </p>
+        </noscript>
         <script type="module" src="/src/main.jsx"></script>
     </body>
 </html>
