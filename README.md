@@ -2,7 +2,7 @@
 
 A fast, private, browser-based text-to-speech reader. Paste text or import a document and listen to it read aloud using the speech voices already installed on your device — nothing is uploaded, and there's no account to create.
 
-Everything runs client-side in the browser. PDFs and EPUBs are parsed locally, text and reading positions live in `localStorage`, and speech is produced by the built-in [Web Speech API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Speech_API). No server, no API keys, no tracking.
+Everything runs client-side in the browser. PDFs and EPUBs are parsed locally, text and reading positions live in `localStorage`, and speech is produced by the built-in [Web Speech API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Speech_API).
 
 ## Screenshots
 
